@@ -11,5 +11,6 @@ A Python class to retrieve and check the status of IBC clients on a chain and it
     - the process will abort if there are more than 100 connections to check (on the cosmos testnet, there are nearly 3000).
     - if this happens, update the list to limit the scan to specific connections.
   - `rest_servers` is a dictionary: `{'chain_id': 'chain id here', 'api': 'the url of the rest server'}`
+    - it must contain an entry for each counterpart chain to be able to verify the client. If one is missing, the concerned clients won't be checked.
 
 - Can be run as Cron jobs, e.g. every hour `0 * * * * sudo -u hermes python3 /home/hermes/HermesClientUpdate/monitor.py`
