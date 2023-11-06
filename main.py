@@ -118,7 +118,7 @@ class ClientMonitorAll:
             # if the revision height happened earlier than 90% of the trusting period, send out a Discord alert.
             if delta > trusting_period * 0.8:
                 self.discord_message(title="WARNING - IBC Client Expiration",
-                                     description=f"""Client **{client_id}** on chain **{counterpart_chain_id}** will expire in {round(delta)} seconds.""", color=16776960,
+                                     description=f"""Client **{client_id}** on chains **{chain_id}**, **{counterpart_chain_id}** will expire in {round(trusting_period-delta)} seconds (~{round((trusting_period-delta)/3600, 2)} hours)""", color=16776960,
                                      tag=role_id)
 
         except Exception as e:

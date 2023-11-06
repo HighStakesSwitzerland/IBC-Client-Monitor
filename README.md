@@ -1,4 +1,7 @@
-A Python class to retrieve and check the status of IBC clients on a chain and its counterpart. 
+A Python class to retrieve and check the status of IBC clients on a chain and its counterpart.
+
+- Alerts are sent to a configurable Discord channel, mentioning roles/people or not, when the last update of a client happened more than 80% of its trusting period.
+- E.g. if the trusting period is 51800 seconds and the last update (manual update or simply a processed IBC transaction) occurred over 41440 seconds ago. It means that in 10360 seconds the client will expire, therefore one should manually update it.
 
 - Requires the Discord python module, install with `python3 -m pip install discord`. Other packages are present by default.
 
