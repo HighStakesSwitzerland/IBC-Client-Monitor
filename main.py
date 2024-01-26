@@ -1,4 +1,4 @@
-from syslog import syslog, LOG_ERR
+from syslog import syslog, LOG_ERR, LOG_INFO, LOG_WARNING
 from time import sleep
 from requests import get
 from datetime import datetime, timezone
@@ -52,7 +52,7 @@ class ClientMonitorAll:
                                         color=16515843)
                         break
                 except Exception as e:
-                    print(f"IBC: error in 'get_ibc_data': {rest_server}, {chain_id}: {str(e)}")
+                    syslog(LOG_ERR, f"IBC: {rest_server}/ibc/core/connection/v1/connections?pagination.key={quote(key)}")
                     syslog(LOG_ERR, f"IBC: error in 'get_ibc_data': {rest_server}, {chain_id}: {str(e)}")
                     break
 
@@ -65,6 +65,7 @@ class ClientMonitorAll:
                         #typically a KeyError, getting something like "'id': 'connection-localhost', 'client_id': '09-localhost'"
                         #but could be a rest server not responding.
                         #print(f"IBC: error in 'get_ibc_data': {chain_id}: {str(e)}")
+                        syslog(LOG_ERR, f"IBC: {rest_server}/ibc/core/client/v1/client_states/{i['client_id']}")
                         syslog(LOG_ERR, f"IBC: error in 'get_ibc_data': {chain_id}: {str(e)}")
                         pass
 
@@ -83,6 +84,7 @@ class ClientMonitorAll:
                     ibc_data.append(data)
                 except Exception as e:
                     #print(f"IBC: Failed to check connection: {chain_id}, {connection}: {str(e)}")
+                    syslog(LOG_ERR, f"IBC: {rest_server}/ibc/core/connection/v1/connections/{connection}")
                     syslog(LOG_ERR, f"IBC: Failed to check connection: {chain_id}, {connection}: {str(e)}")
 
         return ibc_data
@@ -95,13 +97,21 @@ class ClientMonitorAll:
             rest_server = [j['api'] for j in rest_servers if j['chain_id'] == chain_id][0]
             #check the status:
             status = get(f"{rest_server}/ibc/core/client/v1/client_status/{client_id}").json()['status']
+            state = get(f"{rest_server}/ibc/core/client/v1/client_states/{client_id}").json()['client_state']
             if status == 'Active':
-                state = get(f"{rest_server}/ibc/core/client/v1/client_states/{client_id}").json()['client_state']
+                #state = get(f"{rest_server}/ibc/core/client/v1/client_states/{client_id}").json()['client_state']
                 revision_height = state['latest_height']['revision_height']
                 trusting_period = int(state['trusting_period'][:-1]) #return something like 518400s: drop the 's' and interpret as int
 
+            else:
+                syslog(LOG_WARNING, f"IBC: {rest_server}/ibc/core/client/v1/client_status/{client_id} {chain_id}, {state['chain_id']}: {status}")
+
+        except IndexError:
+            syslog(LOG_ERR, f"IBC: no rest server configured for {chain_id}")
+
         except Exception as e:
             #print(f"IBC: Error retrieving data for {chain_id}, {client_id}: {str(e)}")
+            syslog(LOG_ERR, f"IBC: {rest_server}/ibc/core/client/v1/client_status/{client_id}")
             syslog(LOG_ERR, f"IBC: Error retrieving data for {chain_id}, {client_id}: {str(e)}")
 
         return revision_height, trusting_period
@@ -115,15 +125,21 @@ class ClientMonitorAll:
             # compare both timestamps
             delta = current_time_utc - revision_height_timestamp
 
+            syslog(LOG_INFO, f"IBC: {client_id} {round((trusting_period-delta)/3600, 2)} hours left")
+
             # if the revision height happened earlier than 90% of the trusting period, send out a Discord alert.
             if delta > trusting_period * 0.8:
                 self.discord_message(title="WARNING - IBC Client Expiration",
                                      description=f"""Client **{client_id}** on chains **{chain_id}**, **{counterpart_chain_id}** will expire in {round(trusting_period-delta)} seconds (~{round((trusting_period-delta)/3600, 2)} hours)""", color=16776960,
                                      tag=role_id)
 
+        except IndexError:
+            syslog(LOG_ERR, f"IBC: no rest server configured for {counterpart_chain_id}")
+
         except Exception as e:
             #print(f"IBC: Error check client update status {client_id} on {chain_id}: {str(e)}")
-            syslog(LOG_ERR, f"IBC: Error in check_client_update_status {client_id} on {chain_id}: {str(e)}")
+            syslog(LOG_ERR, f"IBC: {rest_server}/cosmos/base/tendermint/v1beta1/blocks/{revision_height}")
+            syslog(LOG_ERR, f"IBC: Error in check_client_update_status {client_id} on {chain_id}, {counterpart_chain_id}: {str(e)}")
 
 
 
