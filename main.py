@@ -127,8 +127,8 @@ class ClientMonitorAll:
 
             syslog(LOG_INFO, f"IBC: {client_id} {round((trusting_period-delta)/3600, 2)} hours left")
 
-            # if the revision height happened earlier than 90% of the trusting period, send out a Discord alert.
-            if delta > trusting_period * 0.8:
+            # if the revision height happened earlier than XX% of the trusting period, send out a Discord alert.
+            if delta > trusting_period * alert_threshold:
                 self.discord_message(title="WARNING - IBC Client Expiration",
                                      description=f"""Client **{client_id}** on chains **{chain_id}**, **{counterpart_chain_id}** will expire in {round(trusting_period-delta)} seconds (~{round((trusting_period-delta)/3600, 2)} hours)""", color=16776960,
                                      tag=role_id)

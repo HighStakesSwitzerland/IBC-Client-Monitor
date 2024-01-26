@@ -10,6 +10,7 @@ monitored_chains = {'elystestnet-1': []} #The value is a list of monitored conne
 #rest servers for all monitored chains AND the counterpart clients must be specified here.
 
 rest_servers = [
+        {'chain_id': 'injective-888', 'api': 'https://injective-testnet-api.polkachu.com'},
         {'chain_id': 'elystestnet-1', 'api':'https://api.testnet.elys.network'},
         {'chain_id': 'axelar-testnet-lisbon-3', 'api': 'https://lcd-axelar-testnet.imperator.co/'},
         {'chain_id': 'theta-testnet-001', 'api': 'https://rest.sentry-01.theta-testnet.polypore.xyz'},
@@ -17,5 +18,8 @@ rest_servers = [
         {'chain_id': 'uni-6', 'api': 'https://juno-testnet-api.polkachu.com'},
         {'chain_id': 'grand-1', 'api': 'https://noble-testnet-api.polkachu.com'},
         {'chain_id': 'sandbox-01', 'api': 'https://api.sandbox-01.aksh.pw'},
+        {'chain_id': 'mocha-4', 'api': 'https://api-mocha.pops.one'},
         {'chain_id': 'osmo-test-5', 'api': 'https://lcd.osmotest5.osmosis.zone'}
         ]
+
+alert_threshold = 0.5 #% of the trusting period under which an alert is sent. 0.5 = the client hasn't been updated for half of its trusting period
