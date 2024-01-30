@@ -22,4 +22,6 @@ rest_servers = [
         {'chain_id': 'osmo-test-5', 'api': 'https://lcd.osmotest5.osmosis.zone'}
         ]
 
-alert_threshold = 0.5 #% of the trusting period under which an alert is sent. 0.5 = the client hasn't been updated for half of its trusting period
+alert_threshold = 0.75 #% of the trusting period under which an alert is sent. 0.5 = the client hasn't been updated for half of its trusting period
+
+bot_token = "discord bot token here"
