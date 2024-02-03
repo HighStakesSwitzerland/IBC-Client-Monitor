@@ -188,7 +188,7 @@ async def input(message):
     last_update = datetime.fromtimestamp(ClientMonitorAll.current_time_utc).strftime('%Y-%m-%d %H:%M')
 
     title="IBC clients status"
-    description = f"Last updated:**{last_update} UTC**\n"
+    description = f"Last updated:**{last_update} UTC**\n\n"
     for key in data:
         description += f"**{key}**:\n🔗'chain_id': **{data[key]['chain_id']}**\n🔗'counterpart_chain_id': **{data[key]['counterpart_chain_id']}**\n⏳'time_to_expiry': **{str(data[key]['time_to_expiry'])+' hours ⚠️' if data[key]['time_to_expiry'] < 50 else str(data[key]['time_to_expiry'])+' hours ✅'}**\n\n"
         #embed.add_field(name=key, value=[i, data[key][i] for i in data[key]])
