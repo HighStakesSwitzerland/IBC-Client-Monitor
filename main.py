@@ -16,6 +16,7 @@ class ClientMonitorAll:
     def __init__(self):
 
         self.ibc_data = {}
+        self.current_time_utc = None
 
     def start(self):
         loop = asyncio.new_event_loop()
@@ -31,20 +32,20 @@ class ClientMonitorAll:
                 ibc_data = self.get_ibc_data(chain_id, connections=monitored_chains[chain_id])
                 #next, check the status of each client. If it's active, check the last update and trusting period.
 
-                current_time_utc = datetime.now(timezone.utc).timestamp() #current time to calculate how long ago the client was updated.
+                self.current_time_utc = datetime.now(timezone.utc).timestamp() #current time to calculate how long ago the client was updated.
 
                 for i in ibc_data:
                     revision_height, trusting_period = self.check_client(chain_id, i['client_id'])
                     #the above will be None if the client is expired. No alert in this instance.
                     if revision_height:
                         self.check_client_update_status(revision_height, trusting_period,
-                                                        current_time_utc, chain_id, i['counterparty']['chain_id'], i['client_id'])
+                                                        self.current_time_utc, chain_id, i['counterparty']['chain_id'], i['client_id'])
                         #and check the counterpart client
                         #IMPORTANT: the "chain_id" and  "i['counterparty']['client_id']" are inverted here.
                         revision_height, trusting_period = self.check_client(i['counterparty']['chain_id'], i['counterparty']['client_id'])
                         if revision_height:
                             self.check_client_update_status(revision_height, trusting_period,
-                                                            current_time_utc, i['counterparty']['chain_id'], chain_id,  i['counterparty']['client_id'])
+                                                            self.current_time_utc, i['counterparty']['chain_id'], chain_id,  i['counterparty']['client_id'])
 
             await asyncio.sleep(7200)
 
@@ -184,9 +185,10 @@ async def on_message(message):
 async def input(message):
 
     data = ClientMonitorAll.ibc_data
+    last_update = datetime.fromtimestamp(ClientMonitorAll.current_time_utc).strftime('%Y-%m-%d %H:%M')
 
     title="IBC clients status"
-    description = ""
+    description = f"Last updated:**{last_update} UTC**\n"
     for key in data:
         description += f"**{key}**:\n🔗'chain_id': **{data[key]['chain_id']}**\n🔗'counterpart_chain_id': **{data[key]['counterpart_chain_id']}**\n⏳'time_to_expiry': **{str(data[key]['time_to_expiry'])+' hours ⚠️' if data[key]['time_to_expiry'] < 50 else str(data[key]['time_to_expiry'])+' hours ✅'}**\n\n"
         #embed.add_field(name=key, value=[i, data[key][i] for i in data[key]])
