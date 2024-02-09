@@ -47,7 +47,7 @@ class ClientMonitorAll:
                             self.check_client_update_status(revision_height, trusting_period,
                                                             self.current_time_utc, i['counterparty']['chain_id'], chain_id,  i['counterparty']['client_id'])
 
-            await asyncio.sleep(7200)
+            await asyncio.sleep(21600)
 
     def get_ibc_data(self, chain_id, connections=None):
 
