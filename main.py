@@ -30,22 +30,23 @@ class ClientMonitorAll:
             for chain_id in monitored_chains:
                 #get the client ids + their counterpart chain and client
                 ibc_data = self.get_ibc_data(chain_id, connections=monitored_chains[chain_id])
+
                 #next, check the status of each client. If it's active, check the last update and trusting period.
 
                 self.current_time_utc = datetime.now(timezone.utc).timestamp() #current time to calculate how long ago the client was updated.
 
                 for i in ibc_data:
-                    revision_height, trusting_period = self.check_client(chain_id, i['client_id'])
+                    revision_height, trusting_period, chain_name = self.check_client(chain_id, i['client_id'])
                     #the above will be None if the client is expired. No alert in this instance.
                     if revision_height:
                         self.check_client_update_status(revision_height, trusting_period,
-                                                        self.current_time_utc, chain_id, i['counterparty']['chain_id'], i['client_id'])
+                                                        self.current_time_utc, chain_id, i['counterparty']['chain_id'], i['client_id'], i['chain_name'])
                         #and check the counterpart client
                         #IMPORTANT: the "chain_id" and  "i['counterparty']['client_id']" are inverted here.
-                        revision_height, trusting_period = self.check_client(i['counterparty']['chain_id'], i['counterparty']['client_id'])
+                        revision_height, trusting_period, chain_name = self.check_client(i['counterparty']['chain_id'], i['counterparty']['client_id'])
                         if revision_height:
                             self.check_client_update_status(revision_height, trusting_period,
-                                                            self.current_time_utc, i['counterparty']['chain_id'], chain_id,  i['counterparty']['client_id'])
+                                                            self.current_time_utc, i['counterparty']['chain_id'], chain_id,  i['counterparty']['client_id'], chain_name)
 
             await asyncio.sleep(21600)
 
@@ -77,6 +78,7 @@ class ClientMonitorAll:
                     try:
                         client_data = get(f"{rest_server}/ibc/core/client/v1/client_states/{i['client_id']}", timeout=2).json()
                         i['counterparty']['chain_id'] = client_data['client_state']['chain_id']
+                        i['chain_name'] = [j['chain_name'] for j in rest_servers if j['chain_id'] == client_data['client_state']['chain_id']][0]
                         ibc_data.append(i)
                     except Exception as e:
                         #typically a KeyError, getting something like "'id': 'connection-localhost', 'client_id': '09-localhost'"
@@ -110,15 +112,18 @@ class ClientMonitorAll:
         #check the client on the chain id
         revision_height = None
         trusting_period = None
+        chain_name = None
         try:
             rest_server = [j['api'] for j in rest_servers if j['chain_id'] == chain_id][0]
             #check the status:
+            print(f"{rest_server}/ibc/core/client/v1/client_status/{client_id}")
             status = get(f"{rest_server}/ibc/core/client/v1/client_status/{client_id}").json()['status']
             state = get(f"{rest_server}/ibc/core/client/v1/client_states/{client_id}").json()['client_state']
             if status == 'Active':
                 #state = get(f"{rest_server}/ibc/core/client/v1/client_states/{client_id}").json()['client_state']
                 revision_height = state['latest_height']['revision_height']
                 trusting_period = int(state['trusting_period'][:-1]) #returns something like 518400s: drop the 's' and interpret as int
+                chain_name = [j['chain_name'] for j in rest_servers if j['chain_id'] == state['chain_id']][0]
 
             else:
                 syslog(LOG_WARNING, f"IBC: {rest_server}/ibc/core/client/v1/client_status/{client_id} {chain_id}, {state['chain_id']}: {status}")
@@ -131,9 +136,9 @@ class ClientMonitorAll:
             syslog(LOG_ERR, f"IBC: {rest_server}/ibc/core/client/v1/client_status/{client_id}")
             syslog(LOG_ERR, f"IBC: Error retrieving data for {chain_id}, {client_id}: {str(e)}")
 
-        return revision_height, trusting_period
+        return revision_height, trusting_period, chain_name
 
-    def check_client_update_status(self, revision_height, trusting_period, current_time_utc, chain_id, counterpart_chain_id, client_id):
+    def check_client_update_status(self, revision_height, trusting_period, current_time_utc, chain_id, counterpart_chain_id, client_id, chain_name):
         try:
             rest_server = [j['api'] for j in rest_servers if j['chain_id'] == counterpart_chain_id][0]
             data = get(f"{rest_server}/cosmos/base/tendermint/v1beta1/blocks/{revision_height}").json()['block']['header']['time']
@@ -147,10 +152,10 @@ class ClientMonitorAll:
             # if the revision height happened earlier than XX% of the trusting period, send out a Discord alert.
             if delta > trusting_period * alert_threshold:
                 self.discord_message(title="WARNING - IBC Client Expiration",
-                                     description=f"""Client **{client_id}** on chains **{chain_id}**, **{counterpart_chain_id}** will expire in {round(trusting_period-delta)} seconds (~{round((trusting_period-delta)/3600, 2)} hours)""", color=16776960,
+                                     description=f"""Client **{client_id}** on {chain_name} (**{chain_id}**, **{counterpart_chain_id}**) will expire in {round(trusting_period-delta)} seconds (~{round((trusting_period-delta)/3600, 2)} hours)""", color=16776960,
                                      tag=role_id)
 
-            self.ibc_data[f'{client_id}'] = {'chain_id': chain_id, 'counterpart_chain_id': counterpart_chain_id, 'time_to_expiry': round((trusting_period-delta)/3600, 2)}
+            self.ibc_data[f'{client_id}'] = {'chain_id': chain_id, 'counterpart_chain_id': counterpart_chain_id, 'time_to_expiry': round((trusting_period-delta)/3600, 2), 'chain_name': chain_name}
 
         except IndexError:
             syslog(LOG_ERR, f"IBC: no rest server configured for {counterpart_chain_id}")
@@ -190,7 +195,7 @@ async def input(message):
     title="IBC clients status"
     description = f"Last updated:**{last_update} UTC**\n\n"
     for key in data:
-        description += f"**{key}**:\n🔗'chain_id': **{data[key]['chain_id']}**\n🔗'counterpart_chain_id': **{data[key]['counterpart_chain_id']}**\n⏳'time_to_expiry': **{str(data[key]['time_to_expiry'])+' hours ⚠️' if data[key]['time_to_expiry'] < 50 else str(data[key]['time_to_expiry'])+' hours ✅'}**\n\n"
+        description += f"**{data[key]['chain_name']}**\n**{key}**:\n🔗'chain_id': **{data[key]['chain_id']}**\n🔗'counterpart_chain_id': **{data[key]['counterpart_chain_id']}**\n⏳'time_to_expiry': **{str(data[key]['time_to_expiry'])+' hours ⚠️' if data[key]['time_to_expiry'] < 50 else str(data[key]['time_to_expiry'])+' hours ✅'}**\n\n"
         #embed.add_field(name=key, value=[i, data[key][i] for i in data[key]])
     embed = Embed(title=title, description=description[:(4095 - len(title))])
     #await message.channel.send(ClientMonitorAll.ibc_data)
