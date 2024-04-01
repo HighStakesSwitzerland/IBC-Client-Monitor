@@ -16,6 +16,7 @@ class ClientMonitorAll:
     def __init__(self):
 
         self.ibc_data = {}
+        self.wallet_balances = {}
         self.current_time_utc = None
 
     def start(self):
@@ -27,6 +28,8 @@ class ClientMonitorAll:
     async def update_ibc_data(self):
 
         while True:
+            wallet_balances = self.check_wallet_balances()
+
             for chain_id in monitored_chains:
                 #get the client ids + their counterpart chain and client
                 ibc_data = self.get_ibc_data(chain_id, connections=monitored_chains[chain_id])
@@ -48,13 +51,14 @@ class ClientMonitorAll:
                             self.check_client_update_status(revision_height, trusting_period,
                                                             self.current_time_utc, i['counterparty']['chain_id'], chain_id,  i['counterparty']['client_id'], chain_name)
 
+
             await asyncio.sleep(21600)
 
     def get_ibc_data(self, chain_id, connections=None):
 
         key = ""
         ibc_data = []
-        rest_server = [j['api'] for j in rest_servers if j['chain_id'] == chain_id][0]
+        rest_server = [j['api'] for j in chain_data if j['chain_id'] == chain_id][0]
 
         if not connections: #no connections specified = scan them all
 
@@ -78,7 +82,7 @@ class ClientMonitorAll:
                     try:
                         client_data = get(f"{rest_server}/ibc/core/client/v1/client_states/{i['client_id']}", timeout=2).json()
                         i['counterparty']['chain_id'] = client_data['client_state']['chain_id']
-                        i['chain_name'] = [j['chain_name'] for j in rest_servers if j['chain_id'] == client_data['client_state']['chain_id']][0]
+                        i['chain_name'] = [j['chain_name'] for j in chain_data if j['chain_id'] == client_data['client_state']['chain_id']][0]
                         ibc_data.append(i)
                     except Exception as e:
                         #typically a KeyError, getting something like "'id': 'connection-localhost', 'client_id': '09-localhost'"
@@ -113,8 +117,9 @@ class ClientMonitorAll:
         revision_height = None
         trusting_period = None
         chain_name = None
+        rest_server = None
         try:
-            rest_server = [j['api'] for j in rest_servers if j['chain_id'] == chain_id][0]
+            rest_server = [j['api'] for j in chain_data if j['chain_id'] == chain_id][0]
             #check the status:
             print(f"{rest_server}/ibc/core/client/v1/client_status/{client_id}")
             status = get(f"{rest_server}/ibc/core/client/v1/client_status/{client_id}").json()['status']
@@ -123,7 +128,7 @@ class ClientMonitorAll:
                 #state = get(f"{rest_server}/ibc/core/client/v1/client_states/{client_id}").json()['client_state']
                 revision_height = state['latest_height']['revision_height']
                 trusting_period = int(state['trusting_period'][:-1]) #returns something like 518400s: drop the 's' and interpret as int
-                chain_name = [j['chain_name'] for j in rest_servers if j['chain_id'] == state['chain_id']][0]
+                chain_name = [j['chain_name'] for j in chain_data if j['chain_id'] == state['chain_id']][0]
 
             else:
                 syslog(LOG_WARNING, f"IBC: {rest_server}/ibc/core/client/v1/client_status/{client_id} {chain_id}, {state['chain_id']}: {status}")
@@ -139,8 +144,9 @@ class ClientMonitorAll:
         return revision_height, trusting_period, chain_name
 
     def check_client_update_status(self, revision_height, trusting_period, current_time_utc, chain_id, counterpart_chain_id, client_id, chain_name):
+        rest_server = None
         try:
-            rest_server = [j['api'] for j in rest_servers if j['chain_id'] == counterpart_chain_id][0]
+            rest_server = [j['api'] for j in chain_data if j['chain_id'] == counterpart_chain_id][0]
             data = get(f"{rest_server}/cosmos/base/tendermint/v1beta1/blocks/{revision_height}").json()['block']['header']['time']
             revision_height_timestamp = datetime.timestamp(datetime.fromisoformat(data.split('.')[0]))
 
@@ -150,7 +156,7 @@ class ClientMonitorAll:
             syslog(LOG_INFO, f"IBC: {client_id} {round((trusting_period-delta)/3600, 2)} hours left")
 
             # if the revision height happened earlier than XX% of the trusting period, send out a Discord alert.
-            if delta > trusting_period * alert_threshold:
+            if delta > trusting_period * expiry_alert_threshold:
                 self.discord_message(title="WARNING - IBC Client Expiration",
                                      description=f"""Client **{client_id}** on {chain_name} (**{chain_id}**, **{counterpart_chain_id}**) will expire in {round(trusting_period-delta)} seconds (~{round((trusting_period-delta)/3600, 2)} hours)""", color=16776960,
                                      tag=role_id)
@@ -174,6 +180,24 @@ class ClientMonitorAll:
         except Exception as e:
             syslog(LOG_ERR, f"IBC: Couldn't send a discord alert, please check configuration.\n{description}\n{e}")
 
+    def check_wallet_balances(self):
+        
+        #check the registered wallet balances and add to a dict that can be queried from Discord
+        #if a balance is less than "balance_alert_threshold" tokens as defined in config.py, send an alert
+
+        for data in chain_data:
+            for wallet in data['wallets']:
+                try:
+                    balance = get(f"{data['api']}/cosmos/bank/v1beta1/balances/{wallet}/by_denom?denom={data['denom']}", timeout=3).json()['balance']['amount']
+                    balance = round(int(balance)/10**data['exponent'], 2)
+                    if balance < balance_alert_threshold:
+                        self.discord_message(title="LOW BALANCE", description=f"Wallet {wallet} has {balance} {data['full_denom']} left.", color=16752640, tag=role_id)
+
+                    self.wallet_balances[wallet] = [data['chain_name'], str(balance) + ' ' + data['full_denom']]
+
+                except Exception as e:
+                    syslog(LOG_ERR, f"IBC: Error in check_wallet_balance for {wallet} on {data['chain_name']}: {str(e)}")
+
 
 ClientMonitorAll = ClientMonitorAll()
 Thread(target=ClientMonitorAll.start).start()
@@ -196,10 +220,23 @@ async def input(message):
     description = f"Last updated:**{last_update} UTC**\n\n"
     for key in data:
         description += f"**{data[key]['chain_name']}**\n**{key}**:\n🔗'chain_id': **{data[key]['chain_id']}**\n🔗'counterpart_chain_id': **{data[key]['counterpart_chain_id']}**\n⏳'time_to_expiry': **{str(data[key]['time_to_expiry'])+' hours ⚠️' if data[key]['time_to_expiry'] < 50 else str(data[key]['time_to_expiry'])+' hours ✅'}**\n\n"
-        #embed.add_field(name=key, value=[i, data[key][i] for i in data[key]])
     embed = Embed(title=title, description=description[:(4095 - len(title))])
-    #await message.channel.send(ClientMonitorAll.ibc_data)
 
     await message.channel.send(embed=embed)
+
+@bot.command(name="wallets")
+async def input(message):
+
+    data = ClientMonitorAll.wallet_balances
+    last_update = datetime.fromtimestamp(ClientMonitorAll.current_time_utc).strftime('%Y-%m-%d %H:%M')
+
+    title="IBC wallets balances"
+    description = f"Last updated:**{last_update} UTC**\n\n"
+    for key in data:
+        description += f"**{data[key][0]}**\n**{key}**:\n🪙Balance: **{data[key][1]}**\n\n"
+    embed = Embed(title=title, description=description[:(4095 - len(title))])
+
+    await message.channel.send(embed=embed)
+
 
 bot.run(bot_token)
