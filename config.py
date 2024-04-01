@@ -24,7 +24,7 @@ chain_data = [
 {'chain_id': 'osmo-test-5', 'api': 'https://lcd.osmotest5.osmosis.zone', 'chain_name': 'OSMOSIS', 'wallets': [], 'exponent': 6, 'denom': 'uosmos', 'full_denom': 'OSMO'},
 {'chain_id': 'dydx-testnet-4', 'api': 'https://dydx-testnet-api.polkachu.com', 'chain_name': 'DYDX', 'wallets': [], 'exponent': 18, 'denom': 'adydx', 'full_denom': 'DYDX'},
 {'chain_id': 'constantine-3', 'api': 'https://archway-testnet-rpc.polkachu.com', 'chain_name': 'ARCHWAY', 'wallets': [], 'exponent': 18, 'denom': 'const', 'full_denom': 'CONST'},
-{'chain_id': 'froopyland_100-1', 'api': 'https://dymension-testnet-api.polkachu.com', 'chain_name': 'DYMENSION', 'wallets': [], 'exponent': 18, 'denom': 'adym', 'full_denom': 'DYM'},
+{'chain_id': 'blumbus_111-1', 'api': 'https://blumbus.api.silknodes.io', 'chain_name': 'DYMENSION', 'wallets': [], 'exponent': 18, 'denom': 'adym', 'full_denom': 'DYM'},
 {'chain_id': 'dorado-1', 'api': 'https://rest-dorado.fetch.ai', 'chain_name': 'FETCHAI', 'wallets': [], 'exponent': 18, 'denom': 'afet', 'full_denom': 'FET'},
 {'chain_id': 'stride-testnet-1', 'api': 'https://stride-testnet-api.polkachu.com', 'chain_name': 'STRIDE', 'wallets': [], 'exponent': 6, 'denom': 'ustrd', 'full_denom': 'STRD'},
 {'chain_id': 'narwhal-2', 'api': 'https://migaloo-testnet-rpc.polkachu.com', 'chain_name': 'MIGALOO', 'wallets': [], 'exponent': 6, 'denom': 'uwhale', 'full_denom': 'WHALE'},
