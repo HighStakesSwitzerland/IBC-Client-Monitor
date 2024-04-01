@@ -1,7 +1,8 @@
-A Python class to retrieve and check the status of IBC clients on a chain and its counterpart.
+A discord bot that monitors the status of IBC channels, and the balances of the relayer wallets.
 
 - Alerts are sent to a configurable Discord channel, mentioning roles/people or not, when the last update of a client happened more than 80% of its trusting period.
 - E.g. if the trusting period is 51800 seconds and the last update (manual update or simply a processed IBC transaction) occurred over 41440 seconds ago. It means that in 10360 seconds the client will expire, therefore one should manually update it.
+- Wallet balances alerts are sent when the balance is below the configured threshold (in `config.py`)
 
 - Requires the Discord python module, install with `python3 -m pip install discord`. Other packages are present by default.
 
@@ -15,5 +16,22 @@ A Python class to retrieve and check the status of IBC clients on a chain and it
     - if this happens, update the list to limit the scan to specific connections.
   - `rest_servers` is a dictionary: `{'chain_id': 'chain id here', 'api': 'the url of the rest server'}`
     - it must contain an entry for each counterpart chain to be able to verify the client. If one is missing, the concerned clients won't be checked.
+  - To query the bot from within a discord channel, it must be created and its token filled out in `config.py`, and allowed to send messages in the channel. Then it can be queried with `$data`and `$wallets`. 
 
-- Can be run as Cron jobs, e.g. every hour `0 * * * * sudo -u hermes python3 /home/hermes/HermesClientUpdate/monitor.py`
+- Run with `python3 main.py`, preferably as a systemd service, e.g.:
+```
+[Unit]
+Description=IBC clients monitor + discord bot
+After=network.target
+
+[Service]
+Type=simple
+Restart=on-failure
+RestartSec=3
+ExecStart=/usr/bin/python3 /etc/IBC-Client-Monitor/main.py
+
+ExecStop=/bin/kill -9 $MAINPID
+
+[Install]
+WantedBy=multi-user.targe
+```
