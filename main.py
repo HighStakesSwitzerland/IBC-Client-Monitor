@@ -233,7 +233,7 @@ async def input(message):
     title="IBC wallets balances"
     description = f"Last updated:**{last_update} UTC**\n\n"
     for key in data:
-        description += f"🔗**{data[key][0]}**\n**{key}**\n\nBalance: **{data[key][1]+' ⚠️' if int(data[key][1].split()[0]) < 2 else data[key][1]+' ✅'}**\n\n"
+        description += f"🔗**{data[key][0]}**\n**{key}**\n\nBalance: **{data[key][1]+' ⚠️' if float(data[key][1].split()[0]) < 2 else data[key][1]+' ✅'}**\n\n"
     embed = Embed(title=title, description=description[:(4095 - len(title))])
 
     await message.channel.send(embed=embed)
