@@ -5,6 +5,7 @@ from syslog import LOG_INFO, LOG_WARNING
 from threading import Thread
 from time import sleep
 from requests import get
+from requests.exceptions import ReadTimeout
 from datetime import datetime, timezone
 from urllib.parse import quote
 from discord import Intents
@@ -287,6 +288,11 @@ e.g. **$register inj1qdqwdsf4wxfcv654qsdfqsdqc5 injective-888 0.5** --> will ale
     try:
         balance = get(f"{data[0]['api']}/cosmos/bank/v1beta1/balances/{wallet}/by_denom?denom={data[0]['denom']}", timeout=3).json()['balance']['amount']
         balance = round(int(balance)/10**data[0]['exponent'], 2)
+
+    except ReadTimeout:
+        discord_message(title="",
+                        description=f"{data[0]['denom']} REST server did not respond in time. Please try again in a few minutes.\n\nIf still no success, please inform an administrator ",
+                        color=16776960, tag=f"<@{user_id}>")
     except Exception as e:
         syslog(LOG_ERR, f"IBC: failed to track wallet: {message.message.content}: {e}")
         discord_message(title="",
