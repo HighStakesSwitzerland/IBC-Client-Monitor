@@ -1,4 +1,5 @@
 import asyncio
+from os import path
 from pprint import pformat
 from syslog import LOG_INFO, LOG_WARNING
 from threading import Thread
@@ -17,6 +18,9 @@ try:
 except: #file doesn't exist or whatever issue: start with a fresh dict.
     tracked_wallets = {}
 
+local_directory = path.dirname(path.abspath(__file__)) #seems needed on the production server, otherwise the tracked_wallets file is created under /
+
+
 
 class ClientMonitorAll:
 
@@ -24,7 +28,8 @@ class ClientMonitorAll:
 
         self.ibc_data = {}
         self.wallet_balances = {}
-        self.current_time_utc = None
+        self.update_time_data = None
+        self.update_time_wallets = None
 
     def start(self):
         loop = asyncio.new_event_loop()
@@ -43,20 +48,20 @@ class ClientMonitorAll:
 
                 #next, check the status of each client. If it's active, check the last update and trusting period.
 
-                self.current_time_utc = datetime.now(timezone.utc).timestamp() #current time to calculate how long ago the client was updated.
+                self.update_time_data = datetime.now(timezone.utc).timestamp() #current time to calculate how long ago the client was updated.
 
                 for i in ibc_data:
                     revision_height, trusting_period, chain_name = self.check_client(chain_id, i['client_id'])
                     #the above will be None if the client is expired. No alert in this instance.
                     if revision_height:
                         self.check_client_update_status(revision_height, trusting_period,
-                                                        self.current_time_utc, chain_id, i['counterparty']['chain_id'], i['client_id'], i['chain_name'])
+                                                        self.update_time_data, chain_id, i['counterparty']['chain_id'], i['client_id'], i['chain_name'])
                         #and check the counterpart client
                         #IMPORTANT: the "chain_id" and  "i['counterparty']['client_id']" are inverted here.
                         revision_height, trusting_period, chain_name = self.check_client(i['counterparty']['chain_id'], i['counterparty']['client_id'])
                         if revision_height:
                             self.check_client_update_status(revision_height, trusting_period,
-                                                            self.current_time_utc, i['counterparty']['chain_id'], chain_id,  i['counterparty']['client_id'], chain_name)
+                                                            self.update_time_data, i['counterparty']['chain_id'], chain_id,  i['counterparty']['client_id'], chain_name)
 
             await asyncio.sleep(update_frequency*3600)
 
@@ -149,7 +154,7 @@ class ClientMonitorAll:
 
         return revision_height, trusting_period, chain_name
 
-    def check_client_update_status(self, revision_height, trusting_period, current_time_utc, chain_id, counterpart_chain_id, client_id, chain_name):
+    def check_client_update_status(self, revision_height, trusting_period, update_time_data, chain_id, counterpart_chain_id, client_id, chain_name):
         rest_server = None
         try:
             rest_server = [j['api'] for j in chain_data if j['chain_id'] == counterpart_chain_id][0]
@@ -157,7 +162,7 @@ class ClientMonitorAll:
             revision_height_timestamp = datetime.timestamp(datetime.fromisoformat(data.split('.')[0]))
 
             # compare both timestamps
-            delta = current_time_utc - revision_height_timestamp
+            delta = update_time_data - revision_height_timestamp
 
             syslog(LOG_INFO, f"IBC: {client_id} {round((trusting_period-delta)/3600, 2)} hours left")
 
@@ -183,7 +188,7 @@ class ClientMonitorAll:
         
         #check the registered wallet balances and add to a dict that can be queried from Discord
         #if a balance is less than "balance_alert_threshold" tokens as defined in config.py, send an alert
-
+        self.update_time_wallets = datetime.now(timezone.utc).timestamp()
         for wallet in tracked_wallets:
             chain_id = tracked_wallets[wallet][0]
             user = tracked_wallets[wallet][1]
@@ -220,7 +225,7 @@ async def input(message):
 
     data = ClientMonitorAll.ibc_data
     try:
-        last_update = datetime.fromtimestamp(ClientMonitorAll.current_time_utc).strftime('%Y-%m-%d %H:%M')
+        last_update = datetime.fromtimestamp(ClientMonitorAll.update_time_data).strftime('%Y-%m-%d %H:%M')
     except: #bot just started, no timestamp yet
         last_update = "N/A"
 
@@ -239,9 +244,10 @@ async def input(message):
 
     data = ClientMonitorAll.wallet_balances
     try:
-        last_update = datetime.fromtimestamp(ClientMonitorAll.current_time_utc).strftime('%Y-%m-%d %H:%M')
+        last_update = datetime.fromtimestamp(ClientMonitorAll.update_time_wallets).strftime('%Y-%m-%d %H:%M')
     except: #bot just started, no timestamp yet
         last_update = "N/A"
+
     title="IBC wallets balances"
     description = f"Last updated:**{last_update} UTC**\n\n"
     for key in data:
@@ -292,7 +298,7 @@ e.g. **$register inj1qdqwdsf4wxfcv654qsdfqsdqc5 injective-888 0.5** --> will ale
     tracked_wallets[wallet] = [chain_id, f"<@{user_id}>", alert_threshold]
 
     try:
-        with open("tracked_wallets.py", "w") as f:
+        with open(path.join(local_directory, "tracked_wallets.py"), "w") as f:
             f.write(f"tracked_wallets = {str(pformat(tracked_wallets))}")
 
         ClientMonitorAll.wallet_balances[wallet] = [data[0]['chain_name'], str(balance) + ' ' + data[0]['full_denom']]
@@ -319,7 +325,7 @@ Only the user that set up the alerts can disable them. Contact an administrator 
         if wallet in [key for key in tracked_wallets]:
             if user_id in tracked_wallets[wallet][1]:
                 del tracked_wallets[wallet]
-                with open("tracked_wallets.py", "w") as f:
+                with open(path.join(local_directory, "tracked_wallets.py"), "w") as f:
                     f.write(f"tracked_wallets = {str(pformat(tracked_wallets))}")
                 del ClientMonitorAll.wallet_balances[wallet]
                 discord_message(title="",
