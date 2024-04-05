@@ -320,10 +320,12 @@ Only the user that set up the alerts can disable them. Contact an administrator 
             if user_id in tracked_wallets[wallet][1]:
                 del tracked_wallets[wallet]
                 with open("tracked_wallets.py", "w") as f:
-                    f.write(f"tracked_wallets = {str(tracked_wallets)}")
+                    f.write(f"tracked_wallets = {str(pformat(tracked_wallets))}")
+                del ClientMonitorAll.wallet_balances[wallet]
                 discord_message(title="",
                                 description=f"Disabled tracking for wallet **{wallet}**.",
                                 color=16752640, tag=f"<@{user_id}>")
+
             else:
                 discord_message(title="",
                                 description=f"Only the original user {tracked_wallets[wallet][1]} can deregister his wallet.\n\nContact an administrator if this user is unreachable.",
