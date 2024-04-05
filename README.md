@@ -12,6 +12,8 @@ A discord bot that monitors the status of IBC channels and the balances of the r
   - Example : `$register cosmos1xxxxxxxxxxxxxxxxxxxxxx theta-testnet-1 2` means that the user will be notified when the balance of this wallet falls below 2 ATOM on the Cosmos testnet.
   - The notification message will tag the user.
   - The wallet monitoring data is stored in `tracked_wallets.py`, which will be created if it doesn't exist.
+  - A wallet can be deregistered so that its balance is no longer checked with the command `$deregister <wallet>`.
+- Run `$help` to view the available commands, and `$help <command>` to get information about a specific command.
 
 ## Deployment & Configuration
 The bot must be added in your own Discord account, then deployed in your server. 

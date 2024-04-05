@@ -1,4 +1,5 @@
 import asyncio
+from pprint import pformat
 from syslog import LOG_INFO, LOG_WARNING
 from threading import Thread
 from time import sleep
@@ -126,7 +127,7 @@ class ClientMonitorAll:
         try:
             rest_server = [j['api'] for j in chain_data if j['chain_id'] == chain_id][0]
             #check the status:
-            print(f"{rest_server}/ibc/core/client/v1/client_status/{client_id}")
+            #print(f"{rest_server}/ibc/core/client/v1/client_status/{client_id}")
             status = get(f"{rest_server}/ibc/core/client/v1/client_status/{client_id}").json()['status']
             state = get(f"{rest_server}/ibc/core/client/v1/client_states/{client_id}").json()['client_state']
             if status == 'Active':
@@ -215,8 +216,13 @@ async def on_message(message):
 @bot.command(name="data")
 async def input(message):
 
+    """Displays the list of currently tracked IBC client and their last known status. No arguments."""
+
     data = ClientMonitorAll.ibc_data
-    last_update = datetime.fromtimestamp(ClientMonitorAll.current_time_utc).strftime('%Y-%m-%d %H:%M')
+    try:
+        last_update = datetime.fromtimestamp(ClientMonitorAll.current_time_utc).strftime('%Y-%m-%d %H:%M')
+    except: #bot just started, no timestamp yet
+        last_update = "N/A"
 
     title="IBC clients status"
     description = f"Last updated:**{last_update} UTC**\n\n"
@@ -229,9 +235,13 @@ async def input(message):
 @bot.command(name="wallets")
 async def input(message):
 
-    data = ClientMonitorAll.wallet_balances
-    last_update = datetime.fromtimestamp(ClientMonitorAll.current_time_utc).strftime('%Y-%m-%d %H:%M')
+    """Displays the list of currently tracked wallets and their last known balance. No arguments."""
 
+    data = ClientMonitorAll.wallet_balances
+    try:
+        last_update = datetime.fromtimestamp(ClientMonitorAll.current_time_utc).strftime('%Y-%m-%d %H:%M')
+    except: #bot just started, no timestamp yet
+        last_update = "N/A"
     title="IBC wallets balances"
     description = f"Last updated:**{last_update} UTC**\n\n"
     for key in data:
@@ -241,9 +251,11 @@ async def input(message):
     await message.channel.send(embed=embed)
 
 
-
 @bot.command(name="register")
 async def input(message):
+    """register an IBC wallet to get balance alerts.\n\nUsage: $register wallet chain_id alert_threshold\n\n
+alert_threshold = remaining balance on wallet before alerting, in tokens.\n\n
+e.g. **$register inj1qdqwdsf4wxfcv654qsdfqsdqc5 injective-888 0.5** --> will alert when balance on wallet falls below 0.5 INJ"""
 
     user_id = message.message.author.id
     #parse the message
@@ -251,7 +263,8 @@ async def input(message):
         wallet = message.message.content.split()[1]
         chain_id = message.message.content.split()[2]
         alert_threshold = float(message.message.content.split()[3])
-    except: #whatever the exception
+    except Exception as e: #whatever the exception
+        syslog(LOG_ERR, f"IBC: failed to track wallet: {message.message.content}: {e}")
         discord_message(title="", description="""Unable to process input.\n\nUsage: $register wallet chain_id alert_threshold\n\n
                         alert_threshold = remaining balance on wallet before alerting, in tokens.\n\n
                         e.g. **$register inj1qdqwdsf4wxfcv654qsdfqsdqc5 injective-888 0.5** --> will alert when balance on wallet falls below 0.5 INJ""",
@@ -267,8 +280,9 @@ async def input(message):
     #Check that wallet exist
     try:
         balance = get(f"{data[0]['api']}/cosmos/bank/v1beta1/balances/{wallet}/by_denom?denom={data[0]['denom']}", timeout=3).json()['balance']['amount']
+        balance = round(int(balance)/10**data[0]['exponent'], 2)
     except Exception as e:
-        print(e)
+        syslog(LOG_ERR, f"IBC: failed to track wallet: {message.message.content}: {e}")
         discord_message(title="",
                         description=f"Couldn't check wallet.\n\nPlease ensure that the address is valid.",
                         color=16776960, tag=f"<@{user_id}>")
@@ -279,15 +293,51 @@ async def input(message):
 
     try:
         with open("tracked_wallets.py", "w") as f:
-            f.write(f"tracked_wallets = {str(tracked_wallets)}")
+            f.write(f"tracked_wallets = {str(pformat(tracked_wallets))}")
+
+        ClientMonitorAll.wallet_balances[wallet] = [data[0]['chain_name'], str(balance) + ' ' + data[0]['full_denom']]
         discord_message(title="",
-                    description=f"Tracking wallet **{wallet}** with alert threshold **{alert_threshold} {data[0]['full_denom']}**.\n\nCurrent balance is {round(int(balance)/10**data[0]['exponent'], 2)} {data[0]['full_denom']}",
+                    description=f"Tracking wallet **{wallet}** with alert threshold **{alert_threshold} {data[0]['full_denom']}**.\n\nCurrent balance is {balance} {data[0]['full_denom']}",
                     color=2161667, tag=f"<@{user_id}>")
     except Exception as e:
         syslog(LOG_ERR, f"IBC: failed to track wallet: {message.message.content}: {e}")
         discord_message(title="",
                         description=f"Failed to track wallet.\nError was logged, please inform an administrator.",
                         color=16515843, tag=f"<@{user_id}>")
+
+
+@bot.command(name="deregister")
+async def input(message):
+
+    """Disabling balance alerts for a previously registered wallet.\n\nUsage: $deregister wallet\n\n
+Only the user that set up the alerts can disable them. Contact an administrator if this user is unreachable."""
+
+    user_id = str(message.message.author.id)
+    #parse the message
+    try:
+        wallet = message.message.content.split()[1]
+        if wallet in [key for key in tracked_wallets]:
+            if user_id in tracked_wallets[wallet][1]:
+                del tracked_wallets[wallet]
+                with open("tracked_wallets.py", "w") as f:
+                    f.write(f"tracked_wallets = {str(tracked_wallets)}")
+                discord_message(title="",
+                                description=f"Disabled tracking for wallet **{wallet}**.",
+                                color=16752640, tag=f"<@{user_id}>")
+            else:
+                discord_message(title="",
+                                description=f"Only the original user {tracked_wallets[wallet][1]} can deregister his wallet.\n\nContact an administrator if this user is unreachable.",
+                                color=16711680, tag=f"<@{user_id}>")
+        else:
+            discord_message(title="",
+                            description=f"Wallet **{wallet}** isn't registered.",
+                            color=16711935, tag=f"<@{user_id}>")
+
+    except Exception as e: #whatever the exception
+        syslog(LOG_ERR, f"IBC: failed to deregister wallet: {message.message.content}: {e}")
+        discord_message(title="", description="Unable to process input.\n\nUsage: $deregister wallet\n\n", color=16776960, tag=f"<@{user_id}>")
+        return
+
 
 bot.run(bot_token)
 
