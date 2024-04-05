@@ -1,14 +1,20 @@
 import asyncio
-from syslog import syslog, LOG_ERR, LOG_INFO, LOG_WARNING
+from syslog import LOG_INFO, LOG_WARNING
 from threading import Thread
 from time import sleep
 from requests import get
 from datetime import datetime, timezone
-from discord import SyncWebhook, Embed, Intents
-from discord.ext import commands
 from urllib.parse import quote
+from discord import Intents
+from discord.ext import commands
+
 
 from config import *
+from discord_message import *
+try:
+    from tracked_wallets import tracked_wallets
+except: #file doesn't exist or whatever issue: start with a fresh dict.
+    tracked_wallets = {}
 
 
 class ClientMonitorAll:
@@ -28,7 +34,7 @@ class ClientMonitorAll:
     async def update_ibc_data(self):
 
         while True:
-            wallet_balances = self.check_wallet_balances()
+            self.check_wallet_balances()
 
             for chain_id in monitored_chains:
                 #get the client ids + their counterpart chain and client
@@ -51,8 +57,7 @@ class ClientMonitorAll:
                             self.check_client_update_status(revision_height, trusting_period,
                                                             self.current_time_utc, i['counterparty']['chain_id'], chain_id,  i['counterparty']['client_id'], chain_name)
 
-
-            await asyncio.sleep(21600)
+            await asyncio.sleep(update_frequency*3600)
 
     def get_ibc_data(self, chain_id, connections=None):
 
@@ -69,8 +74,8 @@ class ClientMonitorAll:
 
                     pagination_total = int(data['pagination']['total']) if data['pagination']['total'] else 0
                     if pagination_total > 100:
-                        self.discord_message("Configuration issue",
-                                f"There are {pagination_total} IBC connections to go through. Aborting as this will likely fail.\nPlease define specific connections to monitor instead.",
+                        discord_message(title="Configuration issue",
+                    description=f"There are {pagination_total} IBC connections to go through. Aborting as this will likely fail.\nPlease define specific connections to monitor instead.",
                                         color=16515843)
                         break
                 except Exception as e:
@@ -157,7 +162,7 @@ class ClientMonitorAll:
 
             # if the revision height happened earlier than XX% of the trusting period, send out a Discord alert.
             if delta > trusting_period * expiry_alert_threshold:
-                self.discord_message(title="WARNING - IBC Client Expiration",
+                discord_message(title="WARNING - IBC Client Expiration",
                                      description=f"""Client **{client_id}** on {chain_name} (**{chain_id}**, **{counterpart_chain_id}**) will expire in {round(trusting_period-delta)} seconds (~{round((trusting_period-delta)/3600, 2)} hours)""", color=16776960,
                                      tag=role_id)
 
@@ -171,32 +176,29 @@ class ClientMonitorAll:
             syslog(LOG_ERR, f"IBC: {rest_server}/cosmos/base/tendermint/v1beta1/blocks/{revision_height}")
             syslog(LOG_ERR, f"IBC: Error in check_client_update_status {client_id} on {chain_id}, {counterpart_chain_id}: {str(e)}")
 
-    def discord_message(self, title, description, color, tag=None):
-        try:
-            webhook = SyncWebhook.from_url(discord_webhook)
-            #discord messages can't exceed 4096 characters, need to truncate in case it's longer.
-            embed = Embed(title=title, description=description[:(4095 - len(title))],color=color)
-            webhook.send(tag, embed=embed)
-        except Exception as e:
-            syslog(LOG_ERR, f"IBC: Couldn't send a discord alert, please check configuration.\n{description}\n{e}")
+
 
     def check_wallet_balances(self):
         
         #check the registered wallet balances and add to a dict that can be queried from Discord
         #if a balance is less than "balance_alert_threshold" tokens as defined in config.py, send an alert
 
-        for data in chain_data:
-            for wallet in data['wallets']:
-                try:
-                    balance = get(f"{data['api']}/cosmos/bank/v1beta1/balances/{wallet}/by_denom?denom={data['denom']}", timeout=3).json()['balance']['amount']
-                    balance = round(int(balance)/10**data['exponent'], 2)
-                    if balance < balance_alert_threshold:
-                        self.discord_message(title="LOW BALANCE", description=f"Wallet {wallet} has {balance} {data['full_denom']} left.", color=16752640, tag=role_id)
+        for wallet in tracked_wallets:
+            chain_id = tracked_wallets[wallet][0]
+            user = tracked_wallets[wallet][1]
+            alert_threshold = tracked_wallets[wallet][2]
+            data = [chain for chain in chain_data if chain['chain_id'] == chain_id][0]
 
-                    self.wallet_balances[wallet] = [data['chain_name'], str(balance) + ' ' + data['full_denom']]
+            try:
+                balance = get(f"{data['api']}/cosmos/bank/v1beta1/balances/{wallet}/by_denom?denom={data['denom']}", timeout=3).json()['balance']['amount']
+                balance = round(int(balance)/10**data['exponent'], 2)
+                if balance < alert_threshold:
+                    discord_message(title="LOW BALANCE", description=f"Wallet {wallet} has {balance} {data['full_denom']} left.", color=16752640, tag=user)
 
-                except Exception as e:
-                    syslog(LOG_ERR, f"IBC: Error in check_wallet_balance for {wallet} on {data['chain_name']}: {str(e)}")
+                self.wallet_balances[wallet] = [data['chain_name'], str(balance) + ' ' + data['full_denom']]
+
+            except Exception as e:
+                syslog(LOG_ERR, f"IBC: Error in check_wallet_balance for {wallet} on {data['chain_name']}: {str(e)}")
 
 
 ClientMonitorAll = ClientMonitorAll()
@@ -239,4 +241,54 @@ async def input(message):
     await message.channel.send(embed=embed)
 
 
+
+@bot.command(name="register")
+async def input(message):
+
+    user_id = message.message.author.id
+    #parse the message
+    try:
+        wallet = message.message.content.split()[1]
+        chain_id = message.message.content.split()[2]
+        alert_threshold = float(message.message.content.split()[3])
+    except: #whatever the exception
+        discord_message(title="", description="""Unable to process input.\n\nUsage: $register wallet chain_id alert_threshold\n\n
+                        alert_threshold = remaining balance on wallet before alerting, in tokens.\n\n
+                        e.g. **$register inj1qdqwdsf4wxfcv654qsdfqsdqc5 injective-888 0.5** --> will alert when balance on wallet falls below 0.5 INJ""",
+                        color=16776960, tag=f"<@{user_id}>")
+        return
+
+    data = [chain for chain in chain_data if chain['chain_id'] == chain_id]
+    if not data:
+        discord_message(title="", description="Chain not found.\n\nThis chain isn't tracked or the chain id does not exist.",
+                        color=16776960, tag=f"<@{user_id}>")
+        return
+
+    #Check that wallet exist
+    try:
+        balance = get(f"{data[0]['api']}/cosmos/bank/v1beta1/balances/{wallet}/by_denom?denom={data[0]['denom']}", timeout=3).json()['balance']['amount']
+    except Exception as e:
+        print(e)
+        discord_message(title="",
+                        description=f"Couldn't check wallet.\n\nPlease ensure that the address is valid.",
+                        color=16776960, tag=f"<@{user_id}>")
+        return
+
+    #insert the wallet / chain / user in the tracked_wallets dict
+    tracked_wallets[wallet] = [chain_id, f"<@{user_id}>", alert_threshold]
+
+    try:
+        with open("tracked_wallets.py", "w") as f:
+            f.write(f"tracked_wallets = {str(tracked_wallets)}")
+        discord_message(title="",
+                    description=f"Tracking wallet **{wallet}** with alert threshold **{alert_threshold} {data[0]['full_denom']}**.\n\nCurrent balance is {round(int(balance)/10**data[0]['exponent'], 2)} {data[0]['full_denom']}",
+                    color=2161667, tag=f"<@{user_id}>")
+    except Exception as e:
+        syslog(LOG_ERR, f"IBC: failed to track wallet: {message.message.content}: {e}")
+        discord_message(title="",
+                        description=f"Failed to track wallet.\nError was logged, please inform an administrator.",
+                        color=16515843, tag=f"<@{user_id}>")
+
 bot.run(bot_token)
+
+
