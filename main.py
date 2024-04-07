@@ -198,7 +198,7 @@ class ClientMonitorAll:
 
             try:
                 balance = get(f"{data['api']}/cosmos/bank/v1beta1/balances/{wallet}/by_denom?denom={data['denom']}", timeout=3).json()['balance']['amount']
-                balance = round(int(balance)/10**data['exponent'], 2)
+                balance = round(int(balance)/10**data['exponent'], 3)
                 if balance < alert_threshold:
                     discord_message(title="LOW BALANCE", description=f"Wallet {wallet} has {balance} {data['full_denom']} left.", color=16752640, tag=user)
 
@@ -287,12 +287,13 @@ e.g. **$register inj1qdqwdsf4wxfcv654qsdfqsdqc5 injective-888 0.5** --> will ale
     #Check that wallet exist
     try:
         balance = get(f"{data[0]['api']}/cosmos/bank/v1beta1/balances/{wallet}/by_denom?denom={data[0]['denom']}", timeout=3).json()['balance']['amount']
-        balance = round(int(balance)/10**data[0]['exponent'], 2)
+        balance = round(int(balance)/10**data[0]['exponent'], 3)
 
     except ReadTimeout:
         discord_message(title="",
                         description=f"{data[0]['denom']} REST server did not respond in time. Please try again in a few minutes.\n\nIf still no success, please inform an administrator ",
                         color=16776960, tag=f"<@{user_id}>")
+        return
     except Exception as e:
         syslog(LOG_ERR, f"IBC: failed to track wallet: {message.message.content}: {e}")
         discord_message(title="",
@@ -352,6 +353,54 @@ Only the user that set up the alerts can disable them. Contact an administrator 
         discord_message(title="", description="Unable to process input.\n\nUsage: $deregister wallet\n\n", color=16776960, tag=f"<@{user_id}>")
         return
 
+@bot.command(name="wallet")
+async def input(message):
+    """Returns the current balance of a registered wallet\n\nUsage: $wallet <wallet_address>\n\nWill return an error if the wallet isn't currently tracked."""
+
+    user_id = message.message.author.id
+    #parse the message
+    try:
+        wallet = message.message.content.split()[1]
+
+    except Exception as e: #whatever the exception
+        syslog(LOG_ERR, f"IBC: failed to check wallet: {message.message.content}: {e}")
+        discord_message(title="", description="""Unable to process input.\n\nUsage: $wallet <wallet>\n\n
+                        Will return the current balance of the wallet.""",
+                        color=16776960, tag=f"<@{user_id}>")
+        return
+
+    try:
+        wallet_data = tracked_wallets[wallet]
+        data = [chain for chain in chain_data if chain['chain_id'] == wallet_data[0]]
+        if not data:
+            raise Exception
+    except Exception as e:
+        syslog(LOG_ERR, f"IBC: failed to check wallet: {message.message.content}: {e}")
+        discord_message(title="", description="Wallet not found.\n\nThis wallet isn't tracked.",
+                            color=16776960, tag=f"<@{user_id}>")
+        return
+
+    #Check balance
+    try:
+        balance = get(f"{data[0]['api']}/cosmos/bank/v1beta1/balances/{wallet}/by_denom?denom={data[0]['denom']}", timeout=3).json()['balance']['amount']
+        balance = round(int(balance)/10**data[0]['exponent'], 3)
+
+    except ReadTimeout:
+        discord_message(title="",
+                        description=f"{data[0]['denom']} REST server did not respond in time. Please try again in a few minutes.\n\nIf still no success, please inform an administrator ",
+                        color=16776960, tag=f"<@{user_id}>")
+        return
+    except Exception as e:
+        syslog(LOG_ERR, f"IBC: failed to track wallet: {message.message.content}: {e}")
+        discord_message(title="",
+                        description=f"Couldn't check wallet.\n\nPlease ensure that the address is valid.",
+                        color=16776960, tag=f"<@{user_id}>")
+        return
+
+    ClientMonitorAll.wallet_balances[wallet] = [data[0]['chain_name'], str(balance) + ' ' + data[0]['full_denom']]
+    discord_message(title="",
+                    description=f"Current balance of wallet **{wallet}** is **{balance} {data[0]['full_denom']}**",
+                    color=2161667, tag=f"<@{user_id}>")
 
 bot.run(bot_token)
 
