@@ -467,7 +467,7 @@ e.g. **$register_chain COSMOS https://rest.sentry-01.theta-testnet.polypore.xyz 
             f.write(f"chain_data = {str(pformat(chain_data))}")
 
         discord_message(title="",
-                    description=f"""Added chain **{chain_name}** with data:\n\nChain_id: **{chain_id}\nDenom: **{denom}**\nToken name {full_denom}\nToken decimals **{exponent}\n\n
+                    description=f"""Added chain **{chain_name}** with data:\n\nChain_id: **{chain_id}**\nDenom: **{denom}**\nToken name: **{full_denom}**\nToken decimals: **{exponent}**\n\n
 If the data isn't correct, please pass the command again with the right information or contact an administrator.""",
                     color=2161667, tag=f"<@{user_id}>")
     except Exception as e:
