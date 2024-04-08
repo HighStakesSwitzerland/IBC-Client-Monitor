@@ -13,6 +13,7 @@ from discord.ext import commands
 
 
 from config import *
+from chains import *
 from discord_message import *
 try:
     from tracked_wallets import tracked_wallets
@@ -252,7 +253,7 @@ async def input(message):
     title="IBC wallets balances"
     description = f"Last updated:**{last_update} UTC**\n\n"
     for key in data:
-        description += f"🔗**{data[key][0]}**\n**{key}**\n\nBalance: **{data[key][1]+' ⚠️' if float(data[key][1].split()[0]) < 2 else data[key][1]+' ✅'}**\n\n"
+        description += f"🔗**{data[key][0]}\n{key}**\n\nBalance: **{data[key][1]+' ⚠️' if float(data[key][1].split()[0]) < 2 else data[key][1]+' ✅'}**\n\n"
     embed = Embed(title=title, description=description[:(4095 - len(title))])
 
     await message.channel.send(embed=embed)
@@ -401,6 +402,80 @@ async def input(message):
     discord_message(title="",
                     description=f"Current balance of wallet **{wallet}** is **{balance} {data[0]['full_denom']}**",
                     color=2161667, tag=f"<@{user_id}>")
+
+@bot.command(name="register_chain")
+async def input(message):
+    """Add a new chain to track IBC clients and relayer wallets.\n\nUsage: $register_chain CHAIN_NAME REST_SERVER TOKEN_NAME TOKEN_DECIMALS\n\n
+e.g. **$register_chain COSMOS https://rest.sentry-01.theta-testnet.polypore.xyz ATOM 6**\n\n
+"token_decimals" is the ratio between the token and its base denom. E.g for Cosmos, 1 ATOM = 10^6 uatom, so token_decimals is 6.\n\n
+**WARNING**: there is no reliable way to verify that the decimals parameter is correct. Please ensure it is the right value, otherwise the wallet balances will be wrong."""
+
+    user_id = message.message.author.id
+    #parse the message
+    try:
+        chain_name = message.message.content.split()[1].upper()
+        rest_server = message.message.content.split()[2]
+        full_denom = message.message.content.split()[3].upper()
+        exponent = message.message.content.split()[4]
+
+
+    except Exception as e: #whatever the exception
+        syslog(LOG_ERR, f"IBC: failed to add chain: {message.message.content}: {e}")
+        discord_message(title="", description="""Unable to process input.\n\nUsage: Usage: $register_chain CHAIN_NAME REST_SERVER TOKEN_NAME TOKEN_DECIMALS\n\n
+                        e.g. **$register_chain COSMOS https://rest.sentry-01.theta-testnet.polypore.xyz ATOM 6**\n\n
+"token_decimals" is the ratio between the token and its base denom. E.g for Cosmos, 1 ATOM = 10^6 uatom, to token_decimals is 6.\n\n
+**WARNING**: there is no reliable way to verify that the decimals parameter is correct. Please ensure it is the right value, otherwise the wallet balances will be wrong.""",
+                        color=16776960, tag=f"<@{user_id}>")
+        return
+
+    #check the API server and match the data
+    try:
+        chain_id = get(f"{rest_server}/cosmos/base/tendermint/v1beta1/node_info", timeout=5).json()['default_node_info']['network']
+        try:
+            denom = get(f"{rest_server}/cosmos/mint/v1beta1/params", timeout=5).json()['params']['mint_denom']
+        except: #some chains have their own custom endpoint with their name instead of "cosmos"... not too reliable though.
+            try:
+                denom = get(f"{rest_server}/{chain_name.lower()}/mint/v1beta1/params", timeout=5).json()['params']['mint_denom']
+            except:
+                raise Exception
+        #exponent = get(f"{rest_server}/cosmos/bank/v1beta1/denoms_metadata/{denom}", timeout=5).json()['params']['mint_denom'] #this value isn't always available. Best to pass it as a parameter.
+        if full_denom.lower() not in denom:
+            raise Exception
+
+    except ReadTimeout:
+        discord_message(title="",
+                        description=f"REST server did not respond in time. Please try again in a few minutes.\n\nIf still no success, try another.",
+                        color=16776960, tag=f"<@{user_id}>")
+        return
+    except Exception as e:
+        syslog(LOG_ERR, f"IBC: wrong denom: {message.message.content}: {e}")
+        discord_message(title="",
+                        description=f"The token name does not to match its base denom, or the chain does not use standard API endpoints. Please verify.\n\nContact an administrator if you believe the data you provided is correct.",
+                        color=16776960, tag=f"<@{user_id}>")
+        return
+
+    #insert the chain in the data and write it in the chain file
+    for chain in chain_data:
+        if chain['chain_id'] == chain_id:
+            chain.update({'api': rest_server, 'chain_name': chain_name, 'exponent': exponent, 'denom': denom, 'full_denom': full_denom})
+            break
+    else:
+        chain_data.append({'chain_id': chain_id, 'api': rest_server, 'chain_name': chain_name, 'exponent': exponent, 'denom': denom, 'full_denom': full_denom})
+
+    try:
+        with open(path.join(local_directory, "chains.py"), "w") as f:
+            f.write(f"chain_data = {str(pformat(chain_data))}")
+
+        discord_message(title="",
+                    description=f"""Added chain **{chain_name}** with data:\n\nChain_id: **{chain_id}\nDenom: **{denom}**\nToken name {full_denom}\nToken decimals **{exponent}\n\n
+If the data isn't correct, please pass the command again with the right information or contact an administrator.""",
+                    color=2161667, tag=f"<@{user_id}>")
+    except Exception as e:
+        syslog(LOG_ERR, f"IBC: failed to add chain: {message.message.content}: {e}")
+        discord_message(title="",
+                        description=f"Failed to add chain.\nError was logged, please inform an administrator.",
+                        color=16515843, tag=f"<@{user_id}>")
+
 
 bot.run(bot_token)
 
