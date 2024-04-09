@@ -416,7 +416,7 @@ e.g. **$register_chain COSMOS https://rest.sentry-01.theta-testnet.polypore.xyz 
         chain_name = message.message.content.split()[1].upper()
         rest_server = message.message.content.split()[2]
         full_denom = message.message.content.split()[3].upper()
-        exponent = message.message.content.split()[4]
+        exponent = int(message.message.content.split()[4])
 
 
     except Exception as e: #whatever the exception
