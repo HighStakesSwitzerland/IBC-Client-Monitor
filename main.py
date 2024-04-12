@@ -209,6 +209,7 @@ class ClientMonitorAll:
                 syslog(LOG_ERR, f"IBC: Error in check_wallet_balance for {wallet} on {data['chain_name']}: {str(e)}")
 
 
+
 ClientMonitorAll = ClientMonitorAll()
 Thread(target=ClientMonitorAll.start).start()
 
@@ -319,7 +320,6 @@ e.g. **$register inj1qdqwdsf4wxfcv654qsdfqsdqc5 injective-888 0.5** --> will ale
                         description=f"Failed to track wallet.\nError was logged, please inform an administrator.",
                         color=16515843, tag=f"<@{user_id}>")
 
-
 @bot.command(name="deregister")
 async def input(message):
 
@@ -353,6 +353,37 @@ Only the user that set up the alerts can disable them. Contact an administrator 
         syslog(LOG_ERR, f"IBC: failed to deregister wallet: {message.message.content}: {e}")
         discord_message(title="", description="Unable to process input.\n\nUsage: $deregister wallet\n\n", color=16776960, tag=f"<@{user_id}>")
         return
+
+@bot.command(name="my_wallets")
+async def input(message):
+    """Returns the current balance of all wallets registered to the user\n\nUsage: $my_wallets."""
+    user_id = message.message.author.id
+    user_wallets = [[wallet, tracked_wallets[wallet]] for wallet in tracked_wallets if str(user_id) in tracked_wallets[wallet][1]]
+
+    if len(user_wallets) == 0:
+        discord_message(title="", description="""No tracked wallets.\n\nUse the `@register` command to add them.""",
+                        color=16776960, tag=f"<@{user_id}>")
+        return
+
+    description = ""
+    for wallet_data in user_wallets:
+        data = [chain for chain in chain_data if chain['chain_id'] == wallet_data[1][0]]
+        try:
+            balance = get(f"{data[0]['api']}/cosmos/bank/v1beta1/balances/{wallet_data[0]}/by_denom?denom={data[0]['denom']}",
+                          timeout=3).json()['balance']['amount']
+            balance = round(int(balance) / 10 ** data[0]['exponent'], 3)
+            ClientMonitorAll.wallet_balances[wallet_data[0]] = [data[0]['chain_name'],
+                                                        str(balance) + ' ' + data[0]['full_denom']]
+            description += f"**{wallet_data[0]}**: {str(balance)} {data[0]['full_denom']}\n\n"
+
+        except Exception as e:
+            syslog(LOG_ERR, f"IBC: failed to track wallet: {message.message.content}: {e}")
+            description += f"**{wallet_data[0]}**: failed to check balance. Please try again later.\n\n"
+
+    discord_message(title="",
+                    description=description,
+                    color=2161667, tag=f"<@{user_id}>")
+
 
 @bot.command(name="wallet")
 async def input(message):
