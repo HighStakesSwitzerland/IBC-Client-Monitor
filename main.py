@@ -264,7 +264,7 @@ async def input(message):
 async def input(message):
     """register an IBC wallet to get balance alerts.\n\nUsage: $register wallet chain_id alert_threshold\n\n
 alert_threshold = remaining balance on wallet before alerting, in tokens.\n\n
-e.g. **$register inj1qdqwdsf4wxfcv654qsdfqsdqc5 injective-888 0.5** --> will alert when balance on wallet falls below 0.5 INJ"""
+e.g. $register inj1qdqwdsf4wxfcv654qsdfqsdqc5 injective-888 0.5 --> will alert when balance on wallet falls below 0.5 INJ"""
 
     user_id = message.message.author.id
     #parse the message
@@ -437,7 +437,7 @@ async def input(message):
 @bot.command(name="register_chain")
 async def input(message):
     """Add a new chain to track IBC clients and relayer wallets.\n\nUsage: $register_chain CHAIN_NAME REST_SERVER TOKEN_NAME TOKEN_DECIMALS\n\n
-e.g. **$register_chain COSMOS https://rest.sentry-01.theta-testnet.polypore.xyz ATOM 6**\n\n
+e.g. $register_chain COSMOS https://rest.sentry-01.theta-testnet.polypore.xyz ATOM 6\n\n
 "token_decimals" is the ratio between the token and its base denom. E.g for Cosmos, 1 ATOM = 10^6 uatom, so token_decimals is 6.\n\n
 **WARNING**: there is no reliable way to verify that the decimals parameter is correct. Please ensure it is the right value, otherwise the wallet balances will be wrong."""
 
