@@ -439,15 +439,22 @@ async def input(message):
     """Add a new chain to track IBC clients and relayer wallets.\n\nUsage: $register_chain CHAIN_NAME REST_SERVER TOKEN_NAME TOKEN_DECIMALS\n\n
 e.g. $register_chain COSMOS https://rest.sentry-01.theta-testnet.polypore.xyz ATOM 6\n\n
 "token_decimals" is the ratio between the token and its base denom. E.g for Cosmos, 1 ATOM = 10^6 uatom, so token_decimals is 6.\n\n
-**WARNING**: there is no reliable way to verify that the decimals parameter is correct. Please ensure it is the right value, otherwise the wallet balances will be wrong."""
+**WARNING**: there is no reliable way to verify that the decimals parameter is correct. Please ensure it is the right value, otherwise the wallet balances will be wrong.\n\n
+Sometimes the denom (e.g. 'uatom') can't be retrieved with the API. If so, you can force it by specifying it at the end of the command:\n\n
+$register_chain COSMOS https://rest.sentry-01.theta-testnet.polypore.xyz ATOM 6 uatom"""
 
     user_id = message.message.author.id
+    denom = None
     #parse the message
     try:
         chain_name = message.message.content.split()[1].upper()
         rest_server = message.message.content.split()[2]
         full_denom = message.message.content.split()[3].upper()
         exponent = int(message.message.content.split()[4])
+        try:
+            denom = message.message.content.split()[5] #if the denom can't be queried from the API, allow forcing it
+        except Exception:
+            pass
 
 
     except Exception as e: #whatever the exception
@@ -462,13 +469,15 @@ e.g. $register_chain COSMOS https://rest.sentry-01.theta-testnet.polypore.xyz AT
     #check the API server and match the data
     try:
         chain_id = get(f"{rest_server}/cosmos/base/tendermint/v1beta1/node_info", timeout=5).json()['default_node_info']['network']
-        try:
-            denom = get(f"{rest_server}/cosmos/mint/v1beta1/params", timeout=5).json()['params']['mint_denom']
-        except: #some chains have their own custom endpoint with their name instead of "cosmos"... not too reliable though.
+
+        if not denom:
             try:
-                denom = get(f"{rest_server}/{chain_name.lower()}/mint/v1beta1/params", timeout=5).json()['params']['mint_denom']
-            except:
-                raise Exception
+                denom = get(f"{rest_server}/cosmos/mint/v1beta1/params", timeout=5).json()['params']['mint_denom']
+            except: #some chains have their own custom endpoint with their name instead of "cosmos"... not too reliable though.
+                try:
+                    denom = get(f"{rest_server}/{chain_name.lower()}/mint/v1beta1/params", timeout=5).json()['params']['mint_denom']
+                except:
+                    raise Exception
         #exponent = get(f"{rest_server}/cosmos/bank/v1beta1/denoms_metadata/{denom}", timeout=5).json()['params']['mint_denom'] #this value isn't always available. Best to pass it as a parameter.
         if full_denom.lower() not in denom:
             raise Exception
@@ -481,7 +490,10 @@ e.g. $register_chain COSMOS https://rest.sentry-01.theta-testnet.polypore.xyz AT
     except Exception as e:
         syslog(LOG_ERR, f"IBC: wrong denom: {message.message.content}: {e}")
         discord_message(title="",
-                        description=f"The token name does not to match its base denom, or the chain does not use standard API endpoints. Please verify.\n\nContact an administrator if you believe the data you provided is correct.",
+                        description="""The token name does not to match its base denom, or the chain does not use standard API endpoints. Please verify.\n\n
+                        If you know this denom (e.g. 'uatom') and are confident it is correct, please pass the command again, specifiyng it at the end:\n\n
+                        $register_chain COSMOS https://rest.sentry-01.theta-testnet.polypore.xyz ATOM 6 **uatom**\n\n
+                        If still encountering an issue, you may contact an administrator.""",
                         color=16776960, tag=f"<@{user_id}>")
         return
 
