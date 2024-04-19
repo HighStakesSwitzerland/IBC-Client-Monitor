@@ -49,7 +49,7 @@ class ClientMonitorAll:
     async def update_ibc_data(self):
 
         while True:
-            # self.check_wallet_balances()
+            self.check_wallet_balances()
 
             for chain_id in monitored_chains:
                 #get the client ids + their counterpart chain and client
