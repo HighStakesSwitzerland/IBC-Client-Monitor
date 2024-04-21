@@ -6,7 +6,7 @@ from syslog import LOG_INFO, LOG_WARNING
 from threading import Thread
 from time import sleep
 from requests import get
-from requests.exceptions import ReadTimeout
+from requests.exceptions import ReadTimeout, RequestException
 from datetime import datetime, timezone
 from urllib.parse import quote
 from discord import Intents
@@ -326,20 +326,39 @@ e.g. $register inj1qdqwdsf4wxfcv654qsdfqsdqc5 injective-888 0.5 --> will alert w
         return
 
     #Check that wallet exist
+    balance = None
     try:
-        balance = get(f"{data[0]['api']}/cosmos/bank/v1beta1/balances/{wallet}/by_denom?denom={data[0]['denom']}", timeout=3).json()['balance']['amount']
-        balance = round(int(balance)/10**data[0]['exponent'], 3)
+        balance = get(f"{data[0]['api']}/cosmos/bank/v1beta1/balances/{wallet}/by_denom?denom={data[0]['denom']}",
+                      timeout=3)
+
+        if balance.status_code == 200:
+            balance = balance.json()['balance']['amount']
+            balance = round(int(balance) / 10 ** data[0]['exponent'], 3)
+        else:
+            raise Exception(balance)
 
     except ReadTimeout:
         discord_message(title="",
                         description=f"{data[0]['denom']} REST server did not respond in time. Please try again in a few minutes.\n\nIf still no success, please inform an administrator ",
                         color=16776960, tag=f"<@{user_id}>")
         return
+
     except Exception as e:
-        syslog(LOG_ERR, f"IBC: failed to track wallet: {message.message.content}: {e}")
+        if balance is not None:
+            syslog(LOG_ERR,
+                   f"IBC: failed to check wallet: {message.message.content}: {balance.status_code} {balance.reason}")
+            description = f"""Query failed with error `{balance.status_code} {balance.reason}`\n```{balance.text}```
+                            If it's an error 400, please ensure that the wallet address is valid.\n
+                            If an error 429, wait a few seconds before retrying.\n
+                            If it keeps happening, try to re-register the chain with a different REST server."""
+
+        else:
+            syslog(LOG_ERR, f"IBC: failed to check wallet: {message.message.content}: {e}")
+
+            description = f"Couldn't check wallet. Got error:\n\n```{e}```\nPlease ensure that the address is correct."
+
         discord_message(title="",
-                        description=f"Couldn't check wallet.\n\nPlease ensure that the address is valid.",
-                        color=16776960, tag=f"<@{user_id}>")
+                        description=description, color=16776960, tag=f"<@{user_id}>")
         return
 
     #insert the wallet / chain / user in the tracked_wallets dict
@@ -452,20 +471,37 @@ async def input(message):
         return
 
     #Check balance
+    balance = None
     try:
-        balance = get(f"{data[0]['api']}/cosmos/bank/v1beta1/balances/{wallet}/by_denom?denom={data[0]['denom']}", timeout=3).json()['balance']['amount']
-        balance = round(int(balance)/10**data[0]['exponent'], 3)
+        balance = get(f"{data[0]['api']}/cosmos/bank/v1beta1/balances/{wallet}/by_denom?denom={data[0]['denom']}", timeout=3)
+
+        if balance.status_code == 200:
+            balance = balance.json()['balance']['amount']
+            balance = round(int(balance)/10**data[0]['exponent'], 3)
+        else:
+            raise Exception(balance)
 
     except ReadTimeout:
         discord_message(title="",
                         description=f"{data[0]['denom']} REST server did not respond in time. Please try again in a few minutes.\n\nIf still no success, please inform an administrator ",
                         color=16776960, tag=f"<@{user_id}>")
         return
+
     except Exception as e:
-        syslog(LOG_ERR, f"IBC: failed to track wallet: {message.message.content}: {e}")
+        if balance is not None:
+            syslog(LOG_ERR, f"IBC: failed to check wallet: {message.message.content}: {balance.status_code} {balance.reason}")
+            description = f"""Query failed with error `{balance.status_code} {balance.reason}`\n```{balance.text}```
+                        If it's an error 400, please ensure that the wallet address is valid.\n
+                        If an error 429, wait a few seconds before retrying.\n
+                        If it keeps happening, try to re-register the chain with a different REST server."""
+
+        else:
+            syslog(LOG_ERR, f"IBC: failed to check wallet: {message.message.content}: {e}")
+
+            description = f"Couldn't check wallet. Got error:\n\n```{e}```"
+
         discord_message(title="",
-                        description=f"Couldn't check wallet.\n\nPlease ensure that the address is valid.",
-                        color=16776960, tag=f"<@{user_id}>")
+                        description=description, color=16776960, tag=f"<@{user_id}>")
         return
 
     ClientMonitorAll.wallet_balances[wallet] = [data[0]['chain_name'], str(balance) + ' ' + data[0]['full_denom']]
@@ -506,20 +542,35 @@ $register_chain COSMOS https://rest.sentry-01.theta-testnet.polypore.xyz ATOM 6 
         return
 
     #check the API server and match the data
+    # chain_id = None
     try:
-        chain_id = get(f"{rest_server}/cosmos/base/tendermint/v1beta1/node_info", timeout=5).json()['default_node_info']['network']
+        chain_id = get(f"{rest_server}/cosmos/base/tendermint/v1beta1/node_info", timeout=5)
+
+        if chain_id.status_code == 200:
+            chain_id = chain_id.json()['default_node_info']['network']
+        else:
+            raise Exception("status_code", chain_id)
 
         if not denom:
             try:
-                denom = get(f"{rest_server}/cosmos/mint/v1beta1/params", timeout=5).json()['params']['mint_denom']
+                denom = get(f"{rest_server}/cosmos/mint/v1beta1/params", timeout=5)
+                if denom.status_code == 200:
+                    denom = denom.json()['params']['mint_denom']
+                else:
+                    raise Exception("status_code", denom)
+
             except: #some chains have their own custom endpoint with their name instead of "cosmos"... not too reliable though.
                 try:
-                    denom = get(f"{rest_server}/{chain_name.lower()}/mint/v1beta1/params", timeout=5).json()['params']['mint_denom']
+                    denom = get(f"{rest_server}/{chain_name.lower()}/mint/v1beta1/params", timeout=5)
+                    if denom.status_code == 200:
+                        denom = denom.json()['params']['mint_denom']
+                    else:
+                        raise Exception("status_code", denom)
                 except:
-                    raise Exception
-        #exponent = get(f"{rest_server}/cosmos/bank/v1beta1/denoms_metadata/{denom}", timeout=5).json()['params']['mint_denom'] #this value isn't always available. Best to pass it as a parameter.
-        if full_denom.lower() not in denom:
-            raise Exception
+                    raise Exception("no_denom")
+            #exponent = get(f"{rest_server}/cosmos/bank/v1beta1/denoms_metadata/{denom}", timeout=5).json()['params']['mint_denom'] #this value isn't always available. Best to pass it as a parameter.
+            if full_denom.lower() not in denom:
+                raise Exception("bad_denom", denom, full_denom)
 
     except ReadTimeout:
         discord_message(title="",
@@ -527,13 +578,36 @@ $register_chain COSMOS https://rest.sentry-01.theta-testnet.polypore.xyz ATOM 6 
                         color=16776960, tag=f"<@{user_id}>")
         return
     except Exception as e:
-        syslog(LOG_ERR, f"IBC: wrong denom: {message.message.content}: {e}")
-        discord_message(title="",
-                        description="""The token name does not to match its base denom, or the chain does not use standard API endpoints. Please verify.\n\n
+        syslog(LOG_ERR, f"IBC: failed to register chain: {message.message.content}: {e}")
+
+        if "status_code" in str(e):
+            description = f"""Query failed with error `{e.args[1].status_code} {e.args[1].reason}`\n```{e.args[1].text}```
+                                    If it's an error 400, please ensure that the wallet address is valid.\n
+                                    If an error 429, wait a few seconds before retrying.\n
+                                    If it keeps happening, try to re-register the chain with a different REST server."""
+            color=16515843
+
+        elif "no_denom" in str(e):
+                description = """Couldn't retrieve the token denom.\n\n
                         If you know this denom (e.g. 'uatom') and are confident it is correct, please pass the command again, specifiyng it at the end:\n\n
                         $register_chain COSMOS https://rest.sentry-01.theta-testnet.polypore.xyz ATOM 6 **uatom**\n\n
-                        If still encountering an issue, you may contact an administrator.""",
-                        color=16776960, tag=f"<@{user_id}>")
+                        If still encountering an issue, you may contact an administrator."""
+                color = 16515843
+
+        elif "bad_denom" in str(e):
+            description = f"""The token name does not to match its base denom. Found `{e.args[1]}` which does not seem to match `{e.args[2]}`.\n\n
+                                    If you are confident it is actually correct, please pass the command again, specifiyng this base denom it at the end:\n\n
+                                    $register_chain {chain_name} {rest_server} {full_denom.upper()} {exponent} **{denom}**\n\n
+                                    If still encountering an issue, you may contact an administrator."""
+            color = 16776960
+
+        else:
+            description = f"Error registering chain: {e}"
+            color=16515843
+
+        discord_message(title="",
+                        description=description,
+                        color=color, tag=f"<@{user_id}>")
         return
 
     #insert the chain in the data and write it in the chain file
