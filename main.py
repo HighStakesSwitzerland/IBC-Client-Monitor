@@ -31,7 +31,7 @@ class ClientMonitorAll:
 
         try:
             self.ibc_data = []
-            with open("ibc_data", "r") as f:
+            with open(path.join(local_directory,"ibc_data"), "r") as f:
                 for i in f.readlines():
                     self.ibc_data.append(loads(i))
         except:
@@ -72,7 +72,7 @@ class ClientMonitorAll:
                             self.check_client_update_status(revision_height, trusting_period,
                                                             i['counterparty']['chain_id'], chain_id,  i['counterparty']['client_id'], chain_name)
 
-            with open('ibc_data', 'w') as f: #store the client data and status with their last checked timestamp. To avoid alerting too soon upon restarting the process.
+            with open(path.join(local_directory,"ibc_data"), 'w') as f: #store the client data and status with their last checked timestamp. To avoid alerting too soon upon restarting the process.
                 self.ibc_data = sorted(self.ibc_data, key=lambda x: list(x.values())[0]['chain_name'])
                 for i in self.ibc_data:
                     f.write(dumps(i)+'\n')
