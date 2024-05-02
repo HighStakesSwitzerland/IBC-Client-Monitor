@@ -20,6 +20,10 @@ try:
     from tracked_wallets import tracked_wallets
 except: #file doesn't exist or whatever issue: start with a fresh dict.
     tracked_wallets = {}
+try:
+    from expired_clients import expired_clients #store the expired clients to avoid checking them again
+except:
+    expired_clients = []
 
 local_directory = path.dirname(path.abspath(__file__)) #seems needed on the production server, otherwise the tracked_wallets file is created under /
 
@@ -60,14 +64,14 @@ class ClientMonitorAll:
                 # self.update_time_data = datetime.now(timezone.utc).timestamp() #current time to calculate how long ago the client was updated.
 
                 for i in ibc_data:
-                    revision_height, trusting_period, chain_name = self.check_client(chain_id, i['client_id'])
+                    revision_height, trusting_period, chain_name = self.check_client(chain_id, i['client_id'], i['id'], i['counterparty']['connection_id'])
                     #the above will be None if the client is expired. No alert in this instance.
                     if revision_height:
                         self.check_client_update_status(revision_height, trusting_period,
                                                         chain_id, i['counterparty']['chain_id'], i['client_id'], i['chain_name'])
                         #and check the counterpart client
                         #IMPORTANT: the "chain_id" and  "i['counterparty']['client_id']" are inverted here.
-                        revision_height, trusting_period, chain_name = self.check_client(i['counterparty']['chain_id'], i['counterparty']['client_id'])
+                        revision_height, trusting_period, chain_name = self.check_client(i['counterparty']['chain_id'], i['counterparty']['client_id'], i['counterparty']['connection_id'], i['id'])
                         if revision_height:
                             self.check_client_update_status(revision_height, trusting_period,
                                                             i['counterparty']['chain_id'], chain_id,  i['counterparty']['client_id'], chain_name)
@@ -76,6 +80,10 @@ class ClientMonitorAll:
                 self.ibc_data = sorted(self.ibc_data, key=lambda x: list(x.values())[0]['chain_name'])
                 for i in self.ibc_data:
                     f.write(dumps(i)+'\n')
+
+            with open(path.join(local_directory, "expired_clients.py"), 'w') as f: #store the expired clients data, so we don't check them anymore.
+                f.write(f"expired_clients = {str(pformat(expired_clients))}")
+
 
             await asyncio.sleep(update_frequency*3600)
 
@@ -90,10 +98,10 @@ class ClientMonitorAll:
             while True:
                 try:
                     query = f"{rest_server}/ibc/core/connection/v1/connections?pagination.key={quote(key)}"
-                    data = get(query, timeout=2).json()
+                    data = get(query, timeout=4).json()
 
                     pagination_total = int(data['pagination']['total']) if data['pagination']['total'] else 0
-                    if pagination_total > 100:
+                    if pagination_total > 300:
                         discord_message(title="Configuration issue",
                     description=f"There are {pagination_total} IBC connections to go through. Aborting as this will likely fail.\nPlease define specific connections to monitor instead.",
                                         color=16515843)
@@ -103,19 +111,30 @@ class ClientMonitorAll:
                     syslog(LOG_ERR, f"IBC: error in 'get_ibc_data': {rest_server}, {chain_id}: {str(e)}")
                     break
 
-                for i in data['connections']:
-                    try:
-                        client_data = get(f"{rest_server}/ibc/core/client/v1/client_states/{i['client_id']}", timeout=2).json()
-                        i['counterparty']['chain_id'] = client_data['client_state']['chain_id']
-                        i['chain_name'] = [j['chain_name'] for j in chain_data if j['chain_id'] == client_data['client_state']['chain_id']][0]
-                        ibc_data.append(i)
-                    except Exception as e:
-                        #typically a KeyError, getting something like "'id': 'connection-localhost', 'client_id': '09-localhost'"
-                        #but could be a rest server not responding.
-                        #print(f"IBC: error in 'get_ibc_data': {chain_id}: {str(e)}")
-                        syslog(LOG_ERR, f"IBC: {rest_server}/ibc/core/client/v1/client_states/{i['client_id']}")
-                        syslog(LOG_ERR, f"IBC: error in 'get_ibc_data': {chain_id}: {str(e)}")
-                        pass
+                for i in [i for i in data['connections'] if i['state'] == 'STATE_OPEN']: #ignore the clients in state 'INIT' or 'TRYOPEN'
+                    is_expired = False
+
+                    for client in expired_clients: #this is horrendous. Basically: if we have 3 matching values out of 4, we can be fairly certain it's the matching entry.
+                        if (i['counterparty']['client_id'] or i['client_id'] in client) and sum(1 for x in [v for v in client.values()][0] if x in {i['counterparty']['connection_id'], i['id'], chain_id }) >= 3:
+                            is_expired = True
+                            break
+
+                    if not is_expired:
+                        try:
+                            client_data = get(f"{rest_server}/ibc/core/client/v1/client_states/{i['client_id']}", timeout=4).json()
+                            i['counterparty']['chain_id'] = client_data['client_state']['chain_id']
+                            i['chain_name'] = [j['chain_name'] for j in chain_data if j['chain_id'] == client_data['client_state']['chain_id']][0]
+                            ibc_data.append(i)
+
+                        except IndexError:
+                            syslog(LOG_ERR, f"IBC: error in 'get_ibc_data': {chain_id}: counterpart chain {client_data['client_state']['chain_id']} is not tracked")
+                        except Exception as e:
+                            #typically a KeyError, getting something like "'id': 'connection-localhost', 'client_id': '09-localhost'"
+                            #but could be a rest server not responding.
+                            syslog(LOG_ERR, f"IBC: {rest_server}/ibc/core/client/v1/client_states/{i['client_id']}")
+                            syslog(LOG_ERR, f"IBC: error in 'get_ibc_data': {chain_id}: {str(e)}")
+                            pass
+                        sleep(0.5) #avoid getting 429's too fast if using a public REST server
 
                 key = data['pagination']['next_key']
 
@@ -127,17 +146,17 @@ class ClientMonitorAll:
         else:
             for connection in connections:
                 try:
-                    data = get(f"{rest_server}/ibc/core/connection/v1/connections/{connection}", timeout=2).json()['connection']
+                    data = get(f"{rest_server}/ibc/core/connection/v1/connections/{connection}", timeout=4).json()['connection']
                     data['id'] = connection
                     ibc_data.append(data)
                 except Exception as e:
-                    #print(f"IBC: Failed to check connection: {chain_id}, {connection}: {str(e)}")
                     syslog(LOG_ERR, f"IBC: {rest_server}/ibc/core/connection/v1/connections/{connection}")
                     syslog(LOG_ERR, f"IBC: Failed to check connection: {chain_id}, {connection}: {str(e)}")
+                sleep(0.5)  # avoid getting 429's too fast if using a public REST server
 
         return ibc_data
 
-    def check_client(self, chain_id, client_id):
+    def check_client(self, chain_id, client_id, connection_id, counterpart_connection_id):
         #check the client on the chain id
         revision_height = None
         trusting_period = None
@@ -146,7 +165,6 @@ class ClientMonitorAll:
         try:
             rest_server = [j['api'] for j in chain_data if j['chain_id'] == chain_id][0]
             #check the status:
-            #print(f"{rest_server}/ibc/core/client/v1/client_status/{client_id}")
             status = get(f"{rest_server}/ibc/core/client/v1/client_status/{client_id}").json()['status']
             state = get(f"{rest_server}/ibc/core/client/v1/client_states/{client_id}").json()['client_state']
             if status == 'Active':
@@ -159,13 +177,14 @@ class ClientMonitorAll:
                     if client_id in data and data[client_id]['counterpart_chain_id'] == state['chain_id']:
                         self.ibc_data.remove(data)
                         break
+                    #add them to the expired_clients so that we skip checking them. Store 4 different items so that we can identify them with certainty.
+                expired_clients.append({client_id : [connection_id, counterpart_connection_id, chain_id, state['chain_id']]})
+
                 syslog(LOG_WARNING, f"IBC: {rest_server}/ibc/core/client/v1/client_status/{client_id} {chain_id}, {state['chain_id']}: {status}")
+                return None, None, None
 
             else:
                 syslog(LOG_WARNING, f"IBC: {rest_server}/ibc/core/client/v1/client_status/{client_id} {chain_id}, {state['chain_id']}: {status}")
-
-        except IndexError:
-            syslog(LOG_ERR, f"IBC: no rest server configured for {chain_id}")
 
         except Exception as e:
             #print(f"IBC: Error retrieving data for {chain_id}, {client_id}: {str(e)}")
@@ -211,6 +230,8 @@ class ClientMonitorAll:
 
         except IndexError:
             syslog(LOG_ERR, f"IBC: no rest server configured for {counterpart_chain_id}")
+        except KeyError:
+            syslog(LOG_ERR, f"Error in check_client_update_status {client_id} on {chain_id}, {counterpart_chain_id}: height unavailable from rest server")
 
         except Exception as e:
             #print(f"IBC: Error check client update status {client_id} on {chain_id}: {str(e)}")
