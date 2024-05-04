@@ -1,5 +1,5 @@
 ## Description
-A discord bot that monitors the status of IBC channels and the balances of the relayer wallets of a blockchain from the Cosmos ecosystem.
+A discord bot that monitors the status of IBC clients and the balances of the relayer wallets of a blockchain from the Cosmos ecosystem.
 
 - Requires the Discord python module, install with `python3 -m pip install discord`. Other packages are present by default.
 - Alerts are sent to a configurable Discord channel, mentioning roles/people or not, when the last update of a client happened more than 80% of its trusting period ago (by default, can be modified).
@@ -40,7 +40,7 @@ The bot must be added in your own Discord account, then deployed in your server.
   - `monitored_chains` is a dictionary whose keys are the chain_id and the values are a list.
     - the value can either be a list of connections to check, e.g. `['connection-0', 'connection-5']`, or an empty list `[]`
     - in this case, all the connections of the concerned chain will be checked.
-    - the process will abort if there are more than 100 connections to check (on the cosmos testnet, there are nearly 3000).
+    - the process will abort if there are more than 300 connections to check (on the cosmos testnet, there are nearly 3000).
     - if this happens, update the list to limit the scan to specific connections.
   - `rest_servers` is a dictionary, with items in the form:
     - `{'chain_id': 'theta-testnet-001', 'api': 'https://rest.sentry-01.theta-testnet.polypore.xyz', 'chain_name': 'COSMOS', 'exponent': 6, 'denom': 'uatom', 'full_denom': 'ATOM'}`
@@ -48,7 +48,7 @@ The bot must be added in your own Discord account, then deployed in your server.
     - it must contain an item for each counterpart chain to be able to verify the client. If one is missing, the concerned clients won't be checked.
   - The bot will update its data every 6 hours by default. You can adjust this value by changing the `update_frequency` item.
 
-- Run with `python3 main.py`, preferably as a systemd service containing for example:
+- Run with `python3 run.py`, preferably as a systemd service containing for example:
 ```
 [Unit]
 Description=IBC clients monitor + discord bot
@@ -58,7 +58,7 @@ After=network.target
 Type=simple
 Restart=on-failure
 RestartSec=3
-ExecStart=/usr/bin/python3 /etc/IBC-Client-Monitor/main.py
+ExecStart=/usr/bin/python3 /etc/IBC-Client-Monitor/run.py
 
 ExecStop=/bin/kill -9 $MAINPID
 
