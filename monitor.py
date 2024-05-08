@@ -245,7 +245,7 @@ class MonitorAll:
                 balance = get(f"{data['api']}/cosmos/bank/v1beta1/balances/{wallet}/by_denom?denom={data['denom']}", timeout=3).json()['balance']['amount']
                 balance = round(int(balance)/10**data['exponent'], 3)
                 if balance < alert_threshold:
-                    discord_message(title="LOW BALANCE", description=f"Wallet {wallet} has {balance} {data['full_denom']} left.", color=16752640, tag=user)
+                    discord_message(title="LOW BALANCE", description=f"Wallet **{wallet}** has **{balance} {data['full_denom']}** left.", color=16752640, tag=user)
 
                 self.wallet_balances[wallet] = [data['chain_name'], str(balance) + ' ' + data['full_denom']]
 
