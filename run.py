@@ -1,4 +1,4 @@
-from discord import Intents
+from discord import Intents, Interaction, Object
 from discord.ext import commands
 from threading import Thread
 from requests.exceptions import ReadTimeout
@@ -7,12 +7,36 @@ from monitor import *
 
 intents = Intents.default()
 intents.message_content = True
-bot = commands.Bot(command_prefix="%", intents=intents)
+bot = commands.Bot(command_prefix="$", intents=intents)
+bot.remove_command('help')
 
+@bot.tree.command(name='help', description='Information on how to use the IBC bot.')
+async def help_command(interaction: Interaction):
+    help_text = """Here is a list of the available commands for interacting with the IBC bot:\n
+`$data`           Displays the list of currently tracked IBC client and their last known status. No arguments.
+`$register`       register an IBC wallet to get balance alerts. **Usage**: */register <wallet>*
+`$deregister`     Disable balance alerts for a previously registered wallet. **Usage**: /deregister <wallet>
+`$register_chain` Add a new chain to track IBC clients and relayer wallets. **Usage**: */register_chain CHAIN_NAME REST_SERVER TOKEN_NAME TOKEN_DECIMALS*
+`$my_wallets`     Returns the current balance of all wallets registered to the user.
+`$wallet`         Returns the current balance of a registered wallet. **Usage**: */wallet <wallet>*
+`$wallets`        Displays the list of currently tracked wallets and their las known balance. No arguments.
+    """
+    await interaction.response.send_message(help_text)
+
+@bot.event
+async def on_ready():
+    if guild_id:
+        guild = Object(id=guild_id)
+    else:
+        guild = None
+
+    bot.tree.clear_commands(guild=guild)
+    await bot.tree.sync(guild=guild)
 
 @bot.event
 async def on_message(message):
     await bot.process_commands(message)
+
 
 
 @bot.command(name="data")
@@ -277,7 +301,7 @@ async def input(message):
 async def input(message):
     """Add a new chain to track IBC clients and relayer wallets.\n\nUsage: $register_chain CHAIN_NAME REST_SERVER TOKEN_NAME TOKEN_DECIMALS\n\n
 e.g. $register_chain COSMOS https://rest.sentry-01.theta-testnet.polypore.xyz ATOM 6\n\n
-"token_decimals" is the ratio between the token and its base denom. E.g for Cosmos, 1 ATOM = 10^6 uatom, so token_decimals is 6.\n\n
+"TOKEN_DECIMALS" is the ratio between the token and its base denom. E.g for Cosmos, 1 ATOM = 10^6 uatom, so TOKEN_DECIMALS is **6**.\n\n
 **WARNING**: there is no reliable way to verify that the decimals parameter is correct. Please ensure it is the right value, otherwise the wallet balances will be wrong.\n\n
 Sometimes the denom (e.g. 'uatom') can't be retrieved with the API. If so, you can force it by specifying it at the end of the command:\n\n
 $register_chain COSMOS https://rest.sentry-01.theta-testnet.polypore.xyz ATOM 6 uatom"""

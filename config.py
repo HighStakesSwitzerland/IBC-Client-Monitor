@@ -2,6 +2,8 @@ discord_webhook = "" #example: "https://discord.com/api/webhooks/106494655640765
 
 bot_token = "" #needed for the bot to be queried from within the channel
 
+guild_id = 914988182594027058 #an example
+
 role_id = ""  #Example : if it is a role, "<@&12345641267>" (mind the <@&>)
               #If it's a user, "<@123456789789>" -- only with <@>
               #Multiple roles or users can be specified. Must be separated with space, not a comma.

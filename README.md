@@ -1,7 +1,7 @@
 ## Description
 A discord bot that monitors the status of IBC clients and the balances of the relayer wallets of a blockchain from the Cosmos ecosystem.
 
-- Requires the Discord python module, install with `python3 -m pip install discord`. Other packages are present by default.
+- Requires the Discord python module, install with `python3 -m pip install discord.py`. Other packages are present by default.
 - Alerts are sent to a configurable Discord channel, mentioning roles/people or not, when the last update of a client happened more than 80% of its trusting period ago (by default, can be modified).
 - E.g. if the trusting period is 51800 seconds and the last update (manual update or simply a processed IBC transaction) occurred over 41440 seconds ago. It means that in 10360 seconds the client will expire, therefore one should manually update it.
 - The bot can be queried from within the Discord channel by passing the following commands:
@@ -22,7 +22,8 @@ The bot must be added in your own Discord account, then deployed in your server.
 - Give it a name and click on **Create**
 - In the **Bot** menu entry, click on **Reset Token** and confirm (you may need to enter a code if you enable 2FA).
 - **Copy this token and do not lose it**. You can already save it in `config.py` for the `bot_token` value.
-- in the **OAuth2** menu, scroll down to **OAuth2 URL Generator** and tick the **bot** checkbox. Then below, tick the **Send Messages** checkbox.
+- in the **OAuth2** menu, scroll down to **OAuth2 URL Generator** and tick the **applications.commands** and **bot** checkboxes. Then below, tick the **Send Messages** and **Slash Commands** checkboxes.
+- The latter allows the bot help to be available for selection when typing "/" (autocompletion).
 - Open the URL that appeared at the bottom of the page, select the Discord server where you want to add the bot, and click on **Authorize**
 - Now go to your Discord server, right-click on the channel where the bot should write and click on **Edit** --> **Add members or roles** --> Select the bot.
 - Select the **Integrations** menu item --> **Webhooks** --> **New Webhook** --> Select it and click on **Copy Webhook URL**.
@@ -30,6 +31,7 @@ The bot must be added in your own Discord account, then deployed in your server.
 ###
 - In `config.py` 
   - Once you have filled out the discord webhook url and bot token, you can define which users/roles will be tagged in the bot messages by updating the value of **role_id** item.
+  - It is recommended but not mandatory to also provide the "guild id", which is the server id : right-click on the server icon, and **Copy Server ID**. This is to facilitate adding the bot help to the / autocompletion.
   - Right-click on a user and click on **Copy User ID**, or click on a user and right-click on one of its roles then on **Copy Role ID**.
   - An ID looks like `972778865355272194`
   - Add these IDs in the **role_id** item, following the syntax:
